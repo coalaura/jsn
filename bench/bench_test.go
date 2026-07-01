@@ -69,7 +69,7 @@ func init() {
 
 	smallData = &Small{
 		ID:     102930192,
-		Name:   "Mechanically Sympathetic User \u2605 with \"escapes\" & \n newlines",
+		Name:   "Some random User \u2605 with \"escapes\" & \n newlines",
 		IsBot:  false,
 		Score:  99.987,
 		Status: &status,
