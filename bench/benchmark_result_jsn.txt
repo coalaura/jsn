@@ -1,8 +1,8 @@
 # go test -bench=_Jsn$ -benchtime=5s
 
 # name, run times, speed, ns/op
-small            133260363               45.00 ns/op            0 B/op          0 allocs/op
-medium           30906759               196.0 ns/op            48 B/op          4 allocs/op
-large              255730             23044 ns/op            8000 B/op        600 allocs/op
-deep             12246397               487.0 ns/op             0 B/op          0 allocs/op
-map               1527195              3929 ns/op            2400 B/op        200 allocs/op
+small            174405423               34.38 ns/op            0 B/op          0 allocs/op
+medium           53088560               112.5 ns/op             0 B/op          0 allocs/op
+large              472119             12693 ns/op               0 B/op          0 allocs/op
+deep             12636111               470.6 ns/op             0 B/op          0 allocs/op
+map               5902690               999.8 ns/op             0 B/op          0 allocs/op
