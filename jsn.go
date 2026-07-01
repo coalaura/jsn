@@ -3,12 +3,11 @@ package jsn
 import (
 	"encoding/json"
 	"io"
-	"maps"
 	"math"
 	"reflect"
 	"strconv"
 	"strings"
-	"sync/atomic"
+	"sync"
 )
 
 const hexTable = "0123456789abcdef"
@@ -26,7 +25,7 @@ type Encoder struct {
 	buf []byte
 }
 
-type encoderFunc func(e *Encoder, v reflect.Value) error
+type encoderFunc func(e *Encoder, b []byte, v reflect.Value) ([]byte, error)
 
 type isEmptyFunc func(v reflect.Value) bool
 
@@ -40,7 +39,7 @@ type structField struct {
 
 var (
 	safeSet [256]bool
-	cache   atomic.Pointer[map[reflect.Type]encoderFunc]
+	cache   sync.Map // map[reflect.Type]encoderFunc
 
 	writerMarshalerType = reflect.TypeFor[WriterMarshaler]()
 	byteMarshalerType   = reflect.TypeFor[ByteMarshaler]()
@@ -60,12 +59,6 @@ func init() {
 	safeSet[0xE2] = false
 }
 
-func init() {
-	m := make(map[reflect.Type]encoderFunc)
-
-	cache.Store(&m)
-}
-
 // NewEncoder returns a new JSON encoder writing to wr.
 func NewEncoder(wr io.Writer) *Encoder {
 	return &Encoder{
@@ -76,15 +69,20 @@ func NewEncoder(wr io.Writer) *Encoder {
 
 // Encode marshals v to JSON and writes it to the underlying writer.
 func (e *Encoder) Encode(v any) error {
-	e.buf = e.buf[:0]
+	b := e.buf[:0]
 
-	if err := e.encodeValue(reflect.ValueOf(v)); err != nil {
+	var err error
+
+	b, err = e.encodeValue(b, reflect.ValueOf(v))
+	if err != nil {
+		e.buf = b // preserve state in case of partial writes/errors
 		return err
 	}
 
-	e.buf = append(e.buf, '\n')
+	b = append(b, '\n')
+	e.buf = b
 
-	_, err := e.wr.Write(e.buf)
+	_, err = e.wr.Write(b)
 	return err
 }
 
@@ -96,8 +94,8 @@ func (e *Encoder) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func (e *Encoder) writeString(s string) {
-	e.buf = append(e.buf, '"')
+func writeString(b []byte, s string) []byte {
+	b = append(b, '"')
 
 	var start int
 
@@ -109,11 +107,8 @@ func (e *Encoder) writeString(s string) {
 		}
 
 		if ch == 0xE2 && i+2 < len(s) && s[i+1] == 0x80 && (s[i+2] == 0xA8 || s[i+2] == 0xA9) {
-			if i > start {
-				e.buf = append(e.buf, s[start:i]...)
-			}
-
-			e.buf = append(e.buf, '\\', 'u', '2', '0', '2', hexTable[s[i+2]&0xf])
+			b = append(b, s[start:i]...)
+			b = append(b, '\\', 'u', '2', '0', '2', hexTable[s[i+2]&0xf])
 
 			i += 2
 			start = i + 1
@@ -122,205 +117,170 @@ func (e *Encoder) writeString(s string) {
 		}
 
 		if ch == 0xE2 {
-			// actually a safe character
-			continue
+			continue // actually a safe character sequence
 		}
 
-		if i > start {
-			e.buf = append(e.buf, s[start:i]...)
-		}
+		b = append(b, s[start:i]...)
 
 		switch ch {
 		case '\\', '"':
-			e.buf = append(e.buf, '\\', ch)
+			b = append(b, '\\', ch)
 		case '\n':
-			e.buf = append(e.buf, '\\', 'n')
+			b = append(b, '\\', 'n')
 		case '\r':
-			e.buf = append(e.buf, '\\', 'r')
+			b = append(b, '\\', 'r')
 		case '\t':
-			e.buf = append(e.buf, '\\', 't')
+			b = append(b, '\\', 't')
 		default:
-			e.buf = append(e.buf, '\\', 'u', '0', '0', hexTable[ch>>4], hexTable[ch&0xf])
+			b = append(b, '\\', 'u', '0', '0', hexTable[ch>>4], hexTable[ch&0xf])
 		}
 
 		start = i + 1
 	}
 
-	if len(s) > start {
-		e.buf = append(e.buf, s[start:]...)
+	if start < len(s) {
+		b = append(b, s[start:]...)
 	}
 
-	e.buf = append(e.buf, '"')
+	return append(b, '"')
 }
 
-func (e *Encoder) encodeValue(v reflect.Value) error {
+func (e *Encoder) encodeValue(b []byte, v reflect.Value) ([]byte, error) {
 	if !v.IsValid() {
-		e.buf = append(e.buf, "null"...)
-
-		return nil
+		return append(b, "null"...), nil
 	}
 
 	enc := getEncoder(v.Type())
 
-	return enc(e, v)
+	return enc(e, b, v)
 }
 
 func getEncoder(tp reflect.Type) encoderFunc {
-	m := *cache.Load()
-
-	if fn, ok := m[tp]; ok {
-		return fn
+	if v, ok := cache.Load(tp); ok {
+		return v.(encoderFunc)
 	}
 
 	fn := buildEncoder(tp, make(map[reflect.Type]*encoderFunc))
 
-	for {
-		mPtr := cache.Load()
-
-		m := *mPtr
-
-		if cached, ok := m[tp]; ok {
-			return cached
-		}
-
-		newM := make(map[reflect.Type]encoderFunc, len(m)+1)
-
-		maps.Copy(newM, m)
-
-		newM[tp] = fn
-
-		if cache.CompareAndSwap(mPtr, &newM) {
-			break
-		}
-	}
-
-	return fn
+	v, _ := cache.LoadOrStore(tp, fn)
+	return v.(encoderFunc)
 }
 
 func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encoderFunc {
-	// break cyclic structs
+	// break on cyclic structs
 	if p, ok := visiting[tp]; ok {
-		return func(e *Encoder, v reflect.Value) error {
-			return (*p)(e, v)
+		return func(e *Encoder, b []byte, v reflect.Value) ([]byte, error) {
+			return (*p)(e, b, v)
 		}
 	}
 
+	p := new(encoderFunc)
+
+	visiting[tp] = p
+
 	var enc encoderFunc
 
-	visiting[tp] = &enc
-
 	if tp.Implements(writerMarshalerType) {
-		enc = func(e *Encoder, v reflect.Value) error {
+		enc = func(e *Encoder, b []byte, v reflect.Value) ([]byte, error) {
 			if v.Kind() == reflect.Pointer && v.IsNil() {
-				e.buf = append(e.buf, "null"...)
-
-				return nil
+				return append(b, "null"...), nil
 			}
 
-			return v.Interface().(WriterMarshaler).MarshalJSON(e)
+			e.buf = b
+
+			err := v.Interface().(WriterMarshaler).MarshalJSON(e)
+			return e.buf, err
 		}
+
+		*p = enc
 
 		return enc
 	}
 
 	if tp.Implements(byteMarshalerType) {
-		enc = func(e *Encoder, v reflect.Value) error {
+		enc = func(e *Encoder, b []byte, v reflect.Value) ([]byte, error) {
 			if v.Kind() == reflect.Pointer && v.IsNil() {
-				e.buf = append(e.buf, "null"...)
-
-				return nil
+				return append(b, "null"...), nil
 			}
 
-			b, err := v.Interface().(ByteMarshaler).MarshalJSON()
+			out, err := v.Interface().(ByteMarshaler).MarshalJSON()
 			if err == nil {
-				e.buf = append(e.buf, b...)
+				b = append(b, out...)
 			}
 
-			return err
+			return b, err
 		}
+
+		*p = enc
 
 		return enc
 	}
 
 	switch tp.Kind() {
 	case reflect.String:
-		enc = func(e *Encoder, v reflect.Value) error {
-			e.writeString(v.String())
-
-			return nil
+		enc = func(e *Encoder, b []byte, v reflect.Value) ([]byte, error) {
+			return writeString(b, v.String()), nil
 		}
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		enc = func(e *Encoder, v reflect.Value) error {
-			e.buf = strconv.AppendInt(e.buf, v.Int(), 10)
-
-			return nil
+		enc = func(e *Encoder, b []byte, v reflect.Value) ([]byte, error) {
+			return strconv.AppendInt(b, v.Int(), 10), nil
 		}
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		enc = func(e *Encoder, v reflect.Value) error {
-			e.buf = strconv.AppendUint(e.buf, v.Uint(), 10)
-
-			return nil
+		enc = func(e *Encoder, b []byte, v reflect.Value) ([]byte, error) {
+			return strconv.AppendUint(b, v.Uint(), 10), nil
 		}
 	case reflect.Float32:
-		enc = func(e *Encoder, v reflect.Value) error {
+		enc = func(e *Encoder, b []byte, v reflect.Value) ([]byte, error) {
 			f := v.Float()
 
 			if math.IsNaN(f) || math.IsInf(f, 0) {
-				return &json.UnsupportedValueError{Value: v, Str: strconv.FormatFloat(f, 'g', -1, 32)}
+				return b, &json.UnsupportedValueError{Value: v, Str: strconv.FormatFloat(f, 'g', -1, 32)}
 			}
 
-			e.buf = strconv.AppendFloat(e.buf, f, 'g', -1, 32)
-
-			return nil
+			return strconv.AppendFloat(b, f, 'g', -1, 32), nil
 		}
 	case reflect.Float64:
-		enc = func(e *Encoder, v reflect.Value) error {
+		enc = func(e *Encoder, b []byte, v reflect.Value) ([]byte, error) {
 			f := v.Float()
 
 			if math.IsNaN(f) || math.IsInf(f, 0) {
-				return &json.UnsupportedValueError{Value: v, Str: strconv.FormatFloat(f, 'g', -1, 64)}
+				return b, &json.UnsupportedValueError{Value: v, Str: strconv.FormatFloat(f, 'g', -1, 64)}
 			}
 
-			e.buf = strconv.AppendFloat(e.buf, f, 'g', -1, 64)
-
-			return nil
+			return strconv.AppendFloat(b, f, 'g', -1, 64), nil
 		}
 	case reflect.Bool:
-		enc = func(e *Encoder, v reflect.Value) error {
+		enc = func(e *Encoder, b []byte, v reflect.Value) ([]byte, error) {
 			if v.Bool() {
-				e.buf = append(e.buf, "true"...)
-			} else {
-				e.buf = append(e.buf, "false"...)
+				return append(b, "true"...), nil
 			}
 
-			return nil
+			return append(b, "false"...), nil
 		}
 	case reflect.Slice:
 		elemEnc := buildEncoder(tp.Elem(), visiting)
 
-		enc = func(e *Encoder, v reflect.Value) error {
+		enc = func(e *Encoder, b []byte, v reflect.Value) ([]byte, error) {
 			if v.IsNil() {
-				e.buf = append(e.buf, "null"...)
-
-				return nil
+				return append(b, "null"...), nil
 			}
 
-			e.buf = append(e.buf, '[')
+			b = append(b, '[')
 
 			for i := range v.Len() {
 				if i > 0 {
-					e.buf = append(e.buf, ',')
+					b = append(b, ',')
 				}
 
-				err := elemEnc(e, v.Index(i))
+				var err error
+
+				b, err = elemEnc(e, b, v.Index(i))
 				if err != nil {
-					return err
+					return b, err
 				}
 			}
 
-			e.buf = append(e.buf, ']')
-
-			return nil
+			return append(b, ']'), nil
 		}
 	case reflect.Map:
 		keyEnc := buildEncoder(tp.Key(), visiting)
@@ -328,84 +288,69 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 
 		isStrKey := tp.Key().Kind() == reflect.String
 
-		enc = func(e *Encoder, v reflect.Value) error {
+		enc = func(e *Encoder, b []byte, v reflect.Value) ([]byte, error) {
 			if v.IsNil() {
-				e.buf = append(e.buf, "null"...)
-
-				return nil
+				return append(b, "null"...), nil
 			}
 
-			e.buf = append(e.buf, '{')
+			b = append(b, '{')
 
 			first := true
-
 			iter := v.MapRange()
 
 			for iter.Next() {
 				if !first {
-					e.buf = append(e.buf, ',')
+					b = append(b, ',')
 				}
 
 				first = false
 
 				if isStrKey {
-					e.writeString(iter.Key().String())
+					b = writeString(b, iter.Key().String())
 				} else {
-					e.buf = append(e.buf, '"')
-
-					err := keyEnc(e, iter.Key())
+					b = append(b, '"')
+					var err error
+					b, err = keyEnc(e, b, iter.Key())
 					if err != nil {
-						return err
+						return b, err
 					}
-
-					e.buf = append(e.buf, '"')
+					b = append(b, '"')
 				}
 
-				e.buf = append(e.buf, ':')
-
-				err := valEnc(e, iter.Value())
+				b = append(b, ':')
+				var err error
+				b, err = valEnc(e, b, iter.Value())
 				if err != nil {
-					return err
+					return b, err
 				}
 			}
-
-			e.buf = append(e.buf, '}')
-
-			return nil
+			return append(b, '}'), nil
 		}
 	case reflect.Struct:
 		enc = buildStructEncoder(tp, visiting)
 	case reflect.Pointer:
 		elemEnc := buildEncoder(tp.Elem(), visiting)
-
-		enc = func(e *Encoder, v reflect.Value) error {
+		enc = func(e *Encoder, b []byte, v reflect.Value) ([]byte, error) {
 			if v.IsNil() {
-				e.buf = append(e.buf, "null"...)
-
-				return nil
+				return append(b, "null"...), nil
 			}
-
-			return elemEnc(e, v.Elem())
+			return elemEnc(e, b, v.Elem())
 		}
 	case reflect.Interface:
-		enc = func(e *Encoder, v reflect.Value) error {
+		enc = func(e *Encoder, b []byte, v reflect.Value) ([]byte, error) {
 			if v.IsNil() {
-				e.buf = append(e.buf, "null"...)
-
-				return nil
+				return append(b, "null"...), nil
 			}
-
-			return e.encodeValue(v.Elem())
+			return e.encodeValue(b, v.Elem())
 		}
 	default:
-		enc = func(e *Encoder, v reflect.Value) error {
+		enc = func(e *Encoder, b []byte, v reflect.Value) ([]byte, error) {
 			// fallback for unsupported types (funcs, channels)
-			e.buf = append(e.buf, "null"...)
-
-			return nil
+			return append(b, "null"...), nil
 		}
 	}
 
+	*p = enc
 	return enc
 }
 
@@ -439,12 +384,13 @@ func buildStructEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc)
 		fields = append(fields, field)
 	}
 
-	return func(e *Encoder, v reflect.Value) error {
-		e.buf = append(e.buf, '{')
-
+	return func(e *Encoder, b []byte, v reflect.Value) ([]byte, error) {
+		b = append(b, '{')
 		first := true
 
-		for _, f := range fields {
+		// Use index over value to avoid copying 48 bytes per field on every iteration
+		for i := range fields {
+			f := &fields[i]
 			fv := v.Field(f.idx)
 
 			if f.omitEmpty && f.isEmpty(fv) {
@@ -452,22 +398,21 @@ func buildStructEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc)
 			}
 
 			if !first {
-				e.buf = append(e.buf, ',')
+				b = append(b, ',')
 			}
 
 			first = false
 
-			e.buf = append(e.buf, f.nameBytes...)
+			b = append(b, f.nameBytes...)
 
-			err := f.enc(e, fv)
+			var err error
+			b, err = f.enc(e, b, fv)
 			if err != nil {
-				return err
+				return b, err
 			}
 		}
 
-		e.buf = append(e.buf, '}')
-
-		return nil
+		return append(b, '}'), nil
 	}
 }
 
