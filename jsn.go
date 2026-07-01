@@ -153,6 +153,31 @@ func (e *Encoder) encodeValue(b []byte, v reflect.Value) ([]byte, error) {
 		return append(b, "null"...), nil
 	}
 
+	iface := v.Interface()
+
+	if m, ok := iface.(WriterMarshaler); ok {
+		if v.Kind() == reflect.Pointer && v.IsNil() {
+			return append(b, "null"...), nil
+		}
+
+		e.buf = b
+
+		err := m.MarshalJSON(e)
+		return e.buf, err
+	}
+	if m, ok := iface.(ByteMarshaler); ok {
+		if v.Kind() == reflect.Pointer && v.IsNil() {
+			return append(b, "null"...), nil
+		}
+
+		out, err := m.MarshalJSON()
+		if err == nil {
+			b = append(b, out...)
+		}
+
+		return b, err
+	}
+
 	enc := getEncoder(v.Type())
 
 	return enc(e, b, v)
