@@ -99,6 +99,9 @@ func writeString(b []byte, s string) []byte {
 
 	var start int
 
+	// BCE
+	_ = s[len(s)-1]
+
 	for i := 0; i < len(s); i++ {
 		ch := s[i]
 
@@ -318,7 +321,9 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 				}
 
 				b = append(b, ':')
+
 				var err error
+
 				b, err = valEnc(e, b, iter.Value())
 				if err != nil {
 					return b, err
@@ -330,10 +335,12 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 		enc = buildStructEncoder(tp, visiting)
 	case reflect.Pointer:
 		elemEnc := buildEncoder(tp.Elem(), visiting)
+
 		enc = func(e *Encoder, b []byte, v reflect.Value) ([]byte, error) {
 			if v.IsNil() {
 				return append(b, "null"...), nil
 			}
+
 			return elemEnc(e, b, v.Elem())
 		}
 	case reflect.Interface:
@@ -341,7 +348,32 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 			if v.IsNil() {
 				return append(b, "null"...), nil
 			}
-			return e.encodeValue(b, v.Elem())
+
+			iface := v.Interface()
+
+			switch val := iface.(type) {
+			case string:
+				return writeString(b, val), nil
+			case bool:
+				if val {
+					return append(b, "true"...), nil
+				}
+
+				return append(b, "false"...), nil
+			case float64:
+				if math.IsNaN(val) || math.IsInf(val, 0) {
+					return b, &json.UnsupportedValueError{Value: reflect.ValueOf(val), Str: strconv.FormatFloat(val, 'g', -1, 64)}
+				}
+
+				return strconv.AppendFloat(b, val, 'g', -1, 64), nil
+			case int:
+				return strconv.AppendInt(b, int64(val), 10), nil
+			case int64:
+				return strconv.AppendInt(b, val, 10), nil
+			}
+
+			// fallback for slices, maps, custom structs hidden in interfaces
+			return e.encodeValue(b, reflect.ValueOf(iface))
 		}
 	default:
 		enc = func(e *Encoder, b []byte, v reflect.Value) ([]byte, error) {
