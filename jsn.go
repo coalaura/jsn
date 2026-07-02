@@ -26,6 +26,7 @@ const (
 	opUint64
 	opFloat64
 	opTime
+	opStringPtr
 )
 
 // WriterMarshaler is implemented by types that can marshal themselves
@@ -72,6 +73,7 @@ type structField struct {
 	offset    uintptr
 	isEmpty   isEmptyFunc
 	omitEmpty bool
+	indirect  bool
 	op        uint8
 }
 
@@ -92,7 +94,7 @@ type sliceHeader struct {
 }
 
 var (
-	safeSet [256]bool
+	safeSet [256]byte
 	cache   sync.Map // map[unsafe.Pointer]*cachedEncoder
 
 	timeType            = reflect.TypeFor[time.Time]()
@@ -103,16 +105,16 @@ var (
 
 func init() {
 	for i := 0x20; i < 256; i++ {
-		safeSet[i] = true
+		safeSet[i] = 1
 	}
 
-	safeSet['\\'] = false
-	safeSet['"'] = false
-	safeSet['<'] = false
-	safeSet['>'] = false
-	safeSet['&'] = false
+	safeSet['\\'] = 0
+	safeSet['"'] = 0
+	safeSet['<'] = 0
+	safeSet['>'] = 0
+	safeSet['&'] = 0
 	// U+2028 and U+2029 start with 0xE2
-	safeSet[0xE2] = false
+	safeSet[0xE2] = 0
 }
 
 //go:nosplit
@@ -241,6 +243,10 @@ func (e *Encoder) encodeAny(b []byte, val any) ([]byte, error) {
 
 func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encoderFunc {
 	if pEnc, ok := visiting[tp]; ok {
+		if enc := *pEnc; enc != nil {
+			return enc
+		}
+
 		return func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
 			return (*pEnc)(enc, b, ptr)
 		}
@@ -431,6 +437,33 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 			return append(b, "false"...), nil
 		}
 	case reflect.Slice:
+		if scalarOp(tp.Elem()) == opString {
+			enc = func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
+				s := *(*[]string)(ptr)
+				if s == nil {
+					return append(b, "null"...), nil
+				}
+
+				if len(s) == 0 {
+					return append(b, '[', ']'), nil
+				}
+
+				b = append(b, '[')
+				b = writeString(b, s[0])
+
+				for _, str := range s[1:] {
+					b = append(b, ',')
+					b = writeString(b, str)
+				}
+
+				return append(b, ']'), nil
+			}
+
+			*pEnc = enc
+
+			return enc
+		}
+
 		elemEnc := buildEncoder(tp.Elem(), visiting)
 		elemSize := tp.Elem().Size()
 
@@ -536,21 +569,20 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 						return append(b, "null"...), nil
 					}
 
-					b = append(b, '{')
-
-					first := true
+					mark := len(b)
 
 					for k, val := range m {
-						if !first {
-							b = append(b, ',')
-						}
-
-						first = false
-
+						b = append(b, ',')
 						b = writeString(b, k)
 						b = append(b, ':')
 						b = strconv.AppendInt(b, val, 10)
 					}
+
+					if len(b) == mark {
+						return append(b, '{', '}'), nil
+					}
+
+					b[mark] = '{'
 
 					return append(b, '}'), nil
 				}
@@ -647,6 +679,19 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 	case reflect.Struct:
 		enc = buildStructEncoder(tp, visiting)
 	case reflect.Pointer:
+		if pElem, ok := visiting[tp.Elem()]; ok && *pElem == nil {
+			enc = func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
+				ptrptr := *(*unsafe.Pointer)(ptr)
+				if ptrptr == nil {
+					return append(b, "null"...), nil
+				}
+
+				return (*pElem)(enc, b, ptrptr)
+			}
+
+			break
+		}
+
 		elemEnc := buildEncoder(tp.Elem(), visiting)
 
 		enc = func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
@@ -698,8 +743,9 @@ func buildStructEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc)
 			offset:    sf.Offset,
 			omitEmpty: strings.Contains(opts, "omitempty"),
 			isEmpty:   buildIsEmptyFunc(sf.Type),
-			op:        fieldOp(sf.Type),
 		}
+
+		field.op, field.indirect = fieldOp(sf.Type)
 
 		fields = append(fields, field)
 	}
@@ -717,6 +763,15 @@ func buildStructEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc)
 			}
 
 			b = append(b, field.nameBytes...)
+
+			if field.indirect {
+				fieldPtr = *(*unsafe.Pointer)(fieldPtr)
+				if fieldPtr == nil {
+					b = append(b, "null"...)
+
+					continue
+				}
+			}
 
 			switch field.op {
 			case opString:
@@ -747,6 +802,12 @@ func buildStructEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc)
 				b = append(b, '"')
 				b = (*time.Time)(fieldPtr).AppendFormat(b, time.RFC3339Nano)
 				b = append(b, '"')
+			case opStringPtr:
+				if strPtr := *(**string)(fieldPtr); strPtr != nil {
+					b = writeString(b, *strPtr)
+				} else {
+					b = append(b, "null"...)
+				}
 			default:
 				var err error
 
@@ -884,8 +945,16 @@ func writeString(b []byte, str string) []byte {
 
 	var safeEnd int
 
+	for safeEnd+8 <= length {
+		if safeSet[str[safeEnd]]&safeSet[str[safeEnd+1]]&safeSet[str[safeEnd+2]]&safeSet[str[safeEnd+3]]&safeSet[str[safeEnd+4]]&safeSet[str[safeEnd+5]]&safeSet[str[safeEnd+6]]&safeSet[str[safeEnd+7]] == 0 {
+			break
+		}
+
+		safeEnd += 8
+	}
+
 	for ; safeEnd < length; safeEnd++ {
-		if !safeSet[str[safeEnd]] {
+		if safeSet[str[safeEnd]] == 0 {
 			break
 		}
 	}
@@ -903,7 +972,7 @@ func writeString(b []byte, str string) []byte {
 	for i := safeEnd; i < length; i++ {
 		ch := str[i]
 
-		if safeSet[ch] {
+		if safeSet[ch] != 0 {
 			continue
 		}
 
@@ -946,7 +1015,23 @@ func writeString(b []byte, str string) []byte {
 	return append(b, '"')
 }
 
-func fieldOp(t reflect.Type) uint8 {
+func fieldOp(t reflect.Type) (uint8, bool) {
+	op := scalarOp(t)
+	if op != opEnc {
+		return op, false
+	}
+
+	if t.Kind() == reflect.Pointer && !t.Implements(writerMarshalerType) && !t.Implements(byteMarshalerType) {
+		op = scalarOp(t.Elem())
+		if op != opEnc {
+			return op, true
+		}
+	}
+
+	return opEnc, false
+}
+
+func scalarOp(t reflect.Type) uint8 {
 	if t == timeType {
 		return opTime
 	}
