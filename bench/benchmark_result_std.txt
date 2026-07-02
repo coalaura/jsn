@@ -1,9 +1,10 @@
 # go test -bench=_Std$ -benchtime=5s
 
 # name, run times, speed, ns/op
-alltypes          9483303               637.0 ns/op           192 B/op          6 allocs/op
-small            39152799               152.3 ns/op             0 B/op          0 allocs/op
-medium            7811686               768.7 ns/op           248 B/op          8 allocs/op
-large               33064            180659 ns/op           64400 B/op       2001 allocs/op
-deep              2561163              2340 ns/op               0 B/op          0 allocs/op
-map                239646             24636 ns/op           13011 B/op        401 allocs/op
+alltypes         7496397               800.2 ns/op            88 B/op          6 allocs/op
+small           26611990               225.5 ns/op             0 B/op          0 allocs/op
+medium           6623439               902.1 ns/op            48 B/op          5 allocs/op
+large              31840            188397 ns/op           12882 B/op       1202 allocs/op
+deep             2685573              2234 ns/op               0 B/op          0 allocs/op
+map               330486             18184 ns/op            1637 B/op        203 allocs/op
+document          152528             39204 ns/op             272 B/op         19 allocs/op
