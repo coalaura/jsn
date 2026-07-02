@@ -49,20 +49,17 @@ type ByteMarshaler interface {
 // produces zero allocations in steady state. An Encoder is not safe for
 // concurrent use.
 type Encoder struct {
-	wr      io.Writer
 	buf     []byte
+	wr      io.Writer
 	scratch unsafe.Pointer // heap-resident slot for pointer-shaped interface words
 }
 
-// TypeEncoder is a pre-compiled encoder bound to a single concrete type.
-// It skips the per-call cache lookup and type inspection that Encode
-// performs. Create one with Compile and reuse it; it is safe for
-// concurrent use by multiple Encoders.
-type TypeEncoder struct {
-	typ    reflect.Type
-	typPtr unsafe.Pointer
-	enc    encoderFunc
-	isPtr  bool
+// TypedEncoder is a pre-compiled encoder bound to T at the type level.
+// Encode takes *T directly, so no interface boxing, dynamic type check,
+// or per-call heap escape can occur. It is safe for concurrent use by
+// multiple Encoders.
+type TypedEncoder[T any] struct {
+	enc encoderFunc
 }
 
 type encoderFunc func(e *Encoder, b []byte, p unsafe.Pointer) ([]byte, error)
@@ -73,8 +70,8 @@ type structField struct {
 	nameBytes []byte
 	enc       encoderFunc
 	offset    uintptr
-	omitEmpty bool
 	isEmpty   isEmptyFunc
+	omitEmpty bool
 	op        uint8
 }
 
@@ -123,14 +120,6 @@ func noescape(ptr unsafe.Pointer) unsafe.Pointer {
 	uiPtr := uintptr(ptr)
 
 	return unsafe.Pointer(uiPtr ^ 0)
-}
-
-// TypedEncoder is a pre-compiled encoder bound to T at the type level.
-// Encode takes *T directly, so no interface boxing, dynamic type check,
-// or per-call heap escape can occur. It is safe for concurrent use by
-// multiple Encoders.
-type TypedEncoder[T any] struct {
-	enc encoderFunc
 }
 
 // CompileTyped builds and caches an encoder for T. Prefer it over
