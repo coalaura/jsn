@@ -57,3 +57,35 @@ func appendInt64Fast(b []byte, n int64) []byte {
 
 	return append(b, buf[i:]...)
 }
+
+func appendUint64Fast(b []byte, u uint64) []byte {
+	if u == 0 {
+		return append(b, '0')
+	}
+
+	var buf [20]byte
+
+	i := len(buf)
+
+	for u >= 100 {
+		q := u / 100
+		r := u - q*100
+
+		i -= 2
+		buf[i] = digitPairs[2*r]
+		buf[i+1] = digitPairs[2*r+1]
+
+		u = q
+	}
+
+	if u >= 10 {
+		i -= 2
+		buf[i] = digitPairs[2*u]
+		buf[i+1] = digitPairs[2*u+1]
+	} else {
+		i--
+		buf[i] = digitPairs[2*u+1]
+	}
+
+	return append(b, buf[i:]...)
+}

@@ -291,9 +291,9 @@ func (te *tapeEncoder) encode(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byt
 		case opInt64:
 			b = appendInt64Fast(b, *(*int64)(fieldPtr))
 		case opUint:
-			b = strconv.AppendUint(b, uint64(*(*uint)(fieldPtr)), 10)
+			b = appendUint64Fast(b, uint64(*(*uint)(fieldPtr)))
 		case opUint64:
-			b = strconv.AppendUint(b, *(*uint64)(fieldPtr), 10)
+			b = appendUint64Fast(b, *(*uint64)(fieldPtr))
 		case opFloat64:
 			f64 := *(*float64)(fieldPtr)
 
@@ -990,9 +990,9 @@ func buildStructEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc)
 			case opInt64:
 				b = appendInt64Fast(b, *(*int64)(fieldPtr))
 			case opUint:
-				b = strconv.AppendUint(b, uint64(*(*uint)(fieldPtr)), 10)
+				b = appendUint64Fast(b, uint64(*(*uint)(fieldPtr)))
 			case opUint64:
-				b = strconv.AppendUint(b, *(*uint64)(fieldPtr), 10)
+				b = appendUint64Fast(b, *(*uint64)(fieldPtr))
 			case opFloat64:
 				f64 := *(*float64)(fieldPtr)
 
@@ -1434,9 +1434,9 @@ func appendScalar(b []byte, op uint8, p unsafe.Pointer) ([]byte, error) {
 	case opInt64:
 		return appendInt64Fast(b, *(*int64)(p)), nil
 	case opUint:
-		return strconv.AppendUint(b, uint64(*(*uint)(p)), 10), nil
+		return appendUint64Fast(b, uint64(*(*uint)(p))), nil
 	case opUint64:
-		return strconv.AppendUint(b, *(*uint64)(p), 10), nil
+		return appendUint64Fast(b, *(*uint64)(p)), nil
 	case opFloat64:
 		f := *(*float64)(p)
 
