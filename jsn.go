@@ -259,8 +259,10 @@ func (e *Encoder) encodeAny(b []byte, val any) ([]byte, error) {
 }
 
 func (te *tapeEncoder) encode(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
-	for i := range te.instrs {
-		ins := &te.instrs[i]
+	instrs := te.instrs
+
+	for i := range instrs {
+		ins := &instrs[i]
 
 		b = append(b, ins.lit...)
 
@@ -540,6 +542,85 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 			return enc
 		}
 
+		if elemTp := tp.Elem(); isFlattenable(elemTp) {
+			te := buildTapeEncoder(elemTp, visiting)
+			elemSize := elemTp.Size()
+
+			enc = func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
+				sh := (*sliceHeader)(ptr)
+				if sh.Data == nil {
+					return append(b, "null"...), nil
+				}
+
+				if sh.Len == 0 {
+					return append(b, '[', ']'), nil
+				}
+
+				b = append(b, '[')
+
+				var err error
+
+				b, err = te.encode(enc, b, sh.Data)
+				if err != nil {
+					return b, err
+				}
+
+				for i := 1; i < sh.Len; i++ {
+					b = append(b, ',')
+
+					b, err = te.encode(enc, b, unsafe.Add(sh.Data, uintptr(i)*elemSize))
+					if err != nil {
+						return b, err
+					}
+				}
+
+				return append(b, ']'), nil
+			}
+
+			*pEnc = enc
+
+			return enc
+		}
+
+		if op := scalarOp(tp.Elem()); op != opEnc {
+			elemSize := tp.Elem().Size()
+
+			enc = func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
+				sh := (*sliceHeader)(ptr)
+				if sh.Data == nil {
+					return append(b, "null"...), nil
+				}
+
+				if sh.Len == 0 {
+					return append(b, '[', ']'), nil
+				}
+
+				b = append(b, '[')
+
+				var err error
+
+				b, err = appendScalar(b, op, sh.Data)
+				if err != nil {
+					return b, err
+				}
+
+				for i := 1; i < sh.Len; i++ {
+					b = append(b, ',')
+
+					b, err = appendScalar(b, op, unsafe.Add(sh.Data, uintptr(i)*elemSize))
+					if err != nil {
+						return b, err
+					}
+				}
+
+				return append(b, ']'), nil
+			}
+
+			*pEnc = enc
+
+			return enc
+		}
+
 		elemEnc := buildEncoder(tp.Elem(), visiting)
 		elemSize := tp.Elem().Size()
 
@@ -576,6 +657,32 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 			return append(b, ']'), nil
 		}
 	case reflect.Array:
+		if op := scalarOp(tp.Elem()); op != opEnc {
+			elemSize := tp.Elem().Size()
+			length := tp.Len()
+
+			enc = func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
+				b = append(b, '[')
+
+				var err error
+
+				for i := 0; i < length; i++ {
+					if i > 0 {
+						b = append(b, ',')
+					}
+
+					b, err = appendScalar(b, op, unsafe.Add(ptr, uintptr(i)*elemSize))
+					if err != nil {
+						return b, err
+					}
+				}
+
+				return append(b, ']'), nil
+			}
+
+			break
+		}
+
 		elemEnc := buildEncoder(tp.Elem(), visiting)
 		elemSize := tp.Elem().Size()
 		length := tp.Len()
@@ -616,21 +723,20 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 						return append(b, "null"...), nil
 					}
 
-					b = append(b, '{')
-
-					first := true
+					mark := len(b)
 
 					for k, val := range m {
-						if !first {
-							b = append(b, ',')
-						}
-
-						first = false
-
+						b = append(b, ',')
 						b = writeString(b, k)
 						b = append(b, ':')
 						b = writeString(b, val)
 					}
+
+					if len(b) == mark {
+						return append(b, '{', '}'), nil
+					}
+
+					b[mark] = '{'
 
 					return append(b, '}'), nil
 				}
@@ -673,17 +779,10 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 						return append(b, "null"...), nil
 					}
 
-					b = append(b, '{')
-
-					first := true
+					mark := len(b)
 
 					for k, val := range m {
-						if !first {
-							b = append(b, ',')
-						}
-
-						first = false
-
+						b = append(b, ',')
 						b = writeString(b, k)
 						b = append(b, ':')
 
@@ -694,6 +793,12 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 							return b, err
 						}
 					}
+
+					if len(b) == mark {
+						return append(b, '{', '}'), nil
+					}
+
+					b[mark] = '{'
 
 					return append(b, '}'), nil
 				}
@@ -754,7 +859,7 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 		}
 	case reflect.Struct:
 		if isFlattenable(tp) {
-			enc = buildTapeEncoder(tp, visiting)
+			enc = buildTapeEncoder(tp, visiting).encode
 		} else {
 			enc = buildStructEncoder(tp, visiting)
 		}
@@ -948,7 +1053,7 @@ func isFlattenable(tp reflect.Type) bool {
 	return true
 }
 
-func buildTapeEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encoderFunc {
+func buildTapeEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) *tapeEncoder {
 	te := &tapeEncoder{}
 
 	var pending []byte
@@ -993,6 +1098,33 @@ func buildTapeEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) e
 				continue
 			}
 
+			if op == opEnc && !indirect && sf.Type.Kind() == reflect.Array && sf.Type.Len() <= 16 {
+				if elemOp := scalarOp(sf.Type.Elem()); elemOp != opEnc {
+					elemSize := sf.Type.Elem().Size()
+					length := sf.Type.Len()
+
+					pending = append(pending, '[')
+
+					for i := 0; i < length; i++ {
+						if i > 0 {
+							pending = append(pending, ',')
+						}
+
+						te.instrs = append(te.instrs, tapeInstr{
+							lit:    pending,
+							offset: base + sf.Offset + uintptr(i)*elemSize,
+							op:     elemOp,
+						})
+
+						pending = nil
+					}
+
+					pending = append(pending, ']')
+
+					continue
+				}
+			}
+
 			ins := tapeInstr{
 				lit:      pending,
 				offset:   base + sf.Offset,
@@ -1016,7 +1148,7 @@ func buildTapeEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) e
 
 	te.tail = pending
 
-	return te.encode
+	return te
 }
 
 func buildIsEmptyFunc(t reflect.Type) isEmptyFunc {
@@ -1281,6 +1413,42 @@ func fieldOp(t reflect.Type) (uint8, bool) {
 	}
 
 	return opEnc, false
+}
+
+func appendScalar(b []byte, op uint8, p unsafe.Pointer) ([]byte, error) {
+	switch op {
+	case opString:
+		return writeString(b, *(*string)(p)), nil
+	case opBool:
+		if *(*bool)(p) {
+			return append(b, "true"...), nil
+		}
+
+		return append(b, "false"...), nil
+	case opInt:
+		return strconv.AppendInt(b, int64(*(*int)(p)), 10), nil
+	case opInt64:
+		return strconv.AppendInt(b, *(*int64)(p), 10), nil
+	case opUint:
+		return strconv.AppendUint(b, uint64(*(*uint)(p)), 10), nil
+	case opUint64:
+		return strconv.AppendUint(b, *(*uint64)(p), 10), nil
+	case opFloat64:
+		f := *(*float64)(p)
+
+		if math.IsNaN(f) || math.IsInf(f, 0) {
+			return b, &json.UnsupportedValueError{Value: reflect.ValueOf(f), Str: strconv.FormatFloat(f, 'g', -1, 64)}
+		}
+
+		return strconv.AppendFloat(b, f, 'g', -1, 64), nil
+	case opTime:
+		b = append(b, '"')
+		b = (*time.Time)(p).AppendFormat(b, time.RFC3339Nano)
+
+		return append(b, '"'), nil
+	}
+
+	return b, nil
 }
 
 func scalarOp(t reflect.Type) uint8 {

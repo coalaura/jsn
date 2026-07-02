@@ -134,6 +134,10 @@ func init() {
 func BenchmarkEncode_AllTypes_Std(b *testing.B) {
 	enc := json.NewEncoder(io.Discard)
 
+	for range 1000 {
+		_ = enc.Encode(allTypesData)
+	}
+
 	b.ReportAllocs()
 	b.ResetTimer()
 
@@ -144,6 +148,10 @@ func BenchmarkEncode_AllTypes_Std(b *testing.B) {
 
 func BenchmarkEncode_AllTypes_Jsn(b *testing.B) {
 	enc := jsn.NewEncoder(io.Discard)
+
+	for range 1000 {
+		_ = allTypesEnc.Encode(enc, allTypesData)
+	}
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -156,6 +164,10 @@ func BenchmarkEncode_AllTypes_Jsn(b *testing.B) {
 func BenchmarkEncode_Small_Std(b *testing.B) {
 	enc := json.NewEncoder(io.Discard)
 
+	for range 1000 {
+		_ = enc.Encode(smallData)
+	}
+
 	b.ReportAllocs()
 	b.ResetTimer()
 
@@ -166,6 +178,10 @@ func BenchmarkEncode_Small_Std(b *testing.B) {
 
 func BenchmarkEncode_Small_Jsn(b *testing.B) {
 	enc := jsn.NewEncoder(io.Discard)
+
+	for range 1000 {
+		_ = smallEnc.Encode(enc, smallData)
+	}
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -178,6 +194,10 @@ func BenchmarkEncode_Small_Jsn(b *testing.B) {
 func BenchmarkEncode_Medium_Std(b *testing.B) {
 	enc := json.NewEncoder(io.Discard)
 
+	for range 500 {
+		_ = enc.Encode(medData)
+	}
+
 	b.ReportAllocs()
 	b.ResetTimer()
 
@@ -188,6 +208,10 @@ func BenchmarkEncode_Medium_Std(b *testing.B) {
 
 func BenchmarkEncode_Medium_Jsn(b *testing.B) {
 	enc := jsn.NewEncoder(io.Discard)
+
+	for range 500 {
+		_ = medEnc.Encode(enc, medData)
+	}
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -200,6 +224,10 @@ func BenchmarkEncode_Medium_Jsn(b *testing.B) {
 func BenchmarkEncode_Large_Std(b *testing.B) {
 	enc := json.NewEncoder(io.Discard)
 
+	for range 100 {
+		_ = enc.Encode(largeData)
+	}
+
 	b.ReportAllocs()
 	b.ResetTimer()
 
@@ -210,6 +238,10 @@ func BenchmarkEncode_Large_Std(b *testing.B) {
 
 func BenchmarkEncode_Large_Jsn(b *testing.B) {
 	enc := jsn.NewEncoder(io.Discard)
+
+	for range 100 {
+		_ = largeEnc.Encode(enc, largeData)
+	}
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -222,6 +254,10 @@ func BenchmarkEncode_Large_Jsn(b *testing.B) {
 func BenchmarkEncode_Deep_Std(b *testing.B) {
 	enc := json.NewEncoder(io.Discard)
 
+	for range 100 {
+		_ = enc.Encode(deepData)
+	}
+
 	b.ReportAllocs()
 	b.ResetTimer()
 
@@ -232,6 +268,10 @@ func BenchmarkEncode_Deep_Std(b *testing.B) {
 
 func BenchmarkEncode_Deep_Jsn(b *testing.B) {
 	enc := jsn.NewEncoder(io.Discard)
+
+	for range 100 {
+		_ = deepEnc.Encode(enc, deepData)
+	}
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -244,6 +284,10 @@ func BenchmarkEncode_Deep_Jsn(b *testing.B) {
 func BenchmarkEncode_Map_Std(b *testing.B) {
 	enc := json.NewEncoder(io.Discard)
 
+	for range 500 {
+		_ = enc.Encode(mapData)
+	}
+
 	b.ReportAllocs()
 	b.ResetTimer()
 
@@ -254,6 +298,10 @@ func BenchmarkEncode_Map_Std(b *testing.B) {
 
 func BenchmarkEncode_Map_Jsn(b *testing.B) {
 	enc := jsn.NewEncoder(io.Discard)
+
+	for range 500 {
+		_ = enc.Encode(mapData)
+	}
 
 	b.ReportAllocs()
 	b.ResetTimer()
