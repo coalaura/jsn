@@ -14,11 +14,18 @@ import (
 	"unsafe"
 )
 
-const (
-	hexTable = "0123456789abcdef"
+const hexTable = "0123456789abcdef"
 
-	lsbMask = 0x0101010101010101
-	msbMask = 0x8080808080808080
+const (
+	opEnc uint8 = iota
+	opString
+	opBool
+	opInt
+	opInt64
+	opUint
+	opUint64
+	opFloat64
+	opTime
 )
 
 // WriterMarshaler is implemented by types that can marshal themselves
@@ -68,6 +75,7 @@ type structField struct {
 	offset    uintptr
 	omitEmpty bool
 	isEmpty   isEmptyFunc
+	op        uint8
 }
 
 type eface struct {
@@ -701,40 +709,70 @@ func buildStructEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc)
 			offset:    sf.Offset,
 			omitEmpty: strings.Contains(opts, "omitempty"),
 			isEmpty:   buildIsEmptyFunc(sf.Type),
+			op:        fieldOp(sf.Type),
 		}
 
 		fields = append(fields, field)
 	}
 
 	return func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
-		b = append(b, '{')
-
-		first := true
+		mark := len(b)
 
 		for i := range fields {
-			f := &fields[i]
+			field := &fields[i]
 
-			fieldPtr := unsafe.Add(ptr, f.offset)
+			fieldPtr := unsafe.Add(ptr, field.offset)
 
-			if f.omitEmpty && f.isEmpty(fieldPtr) {
+			if field.omitEmpty && field.isEmpty(fieldPtr) {
 				continue
 			}
 
-			if !first {
-				b = append(b, ',')
-			}
+			b = append(b, field.nameBytes...)
 
-			first = false
+			switch field.op {
+			case opString:
+				b = writeString(b, *(*string)(fieldPtr))
+			case opBool:
+				if *(*bool)(fieldPtr) {
+					b = append(b, "true"...)
+				} else {
+					b = append(b, "false"...)
+				}
+			case opInt:
+				b = strconv.AppendInt(b, int64(*(*int)(fieldPtr)), 10)
+			case opInt64:
+				b = strconv.AppendInt(b, *(*int64)(fieldPtr), 10)
+			case opUint:
+				b = strconv.AppendUint(b, uint64(*(*uint)(fieldPtr)), 10)
+			case opUint64:
+				b = strconv.AppendUint(b, *(*uint64)(fieldPtr), 10)
+			case opFloat64:
+				f64 := *(*float64)(fieldPtr)
 
-			b = append(b, f.nameBytes...)
+				if math.IsNaN(f64) || math.IsInf(f64, 0) {
+					return b, &json.UnsupportedValueError{Value: reflect.ValueOf(f64), Str: strconv.FormatFloat(f64, 'g', -1, 64)}
+				}
 
-			var err error
+				b = strconv.AppendFloat(b, f64, 'g', -1, 64)
+			case opTime:
+				b = append(b, '"')
+				b = (*time.Time)(fieldPtr).AppendFormat(b, time.RFC3339Nano)
+				b = append(b, '"')
+			default:
+				var err error
 
-			b, err = f.enc(enc, b, fieldPtr)
-			if err != nil {
-				return b, err
+				b, err = field.enc(enc, b, fieldPtr)
+				if err != nil {
+					return b, err
+				}
 			}
 		}
+
+		if len(b) == mark {
+			return append(b, '{', '}'), nil
+		}
+
+		b[mark] = '{'
 
 		return append(b, '}'), nil
 	}
@@ -917,4 +955,33 @@ func writeString(b []byte, str string) []byte {
 	}
 
 	return append(b, '"')
+}
+
+func fieldOp(t reflect.Type) uint8 {
+	if t == timeType {
+		return opTime
+	}
+
+	if t == byteSliceType || t.Implements(writerMarshalerType) || t.Implements(byteMarshalerType) {
+		return opEnc
+	}
+
+	switch t.Kind() {
+	case reflect.String:
+		return opString
+	case reflect.Bool:
+		return opBool
+	case reflect.Int:
+		return opInt
+	case reflect.Int64:
+		return opInt64
+	case reflect.Uint:
+		return opUint
+	case reflect.Uint64:
+		return opUint64
+	case reflect.Float64:
+		return opFloat64
+	}
+
+	return opEnc
 }
