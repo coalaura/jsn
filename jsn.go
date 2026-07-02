@@ -1372,6 +1372,7 @@ func buildStructEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc)
 
 			if first {
 				b = append(b, field.nameBytes[1:]...)
+
 				first = false
 			} else {
 				b = append(b, field.nameBytes...)
