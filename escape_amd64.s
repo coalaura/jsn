@@ -12,9 +12,11 @@ DATA ·escape_consts+64(SB)/8,  $0x2626262626262626  // &
 DATA ·escape_consts+72(SB)/8,  $0x2626262626262626
 DATA ·escape_consts+80(SB)/8,  $0xE2E2E2E2E2E2E2E2  // 0xE2 (U+2028/2029 lead)
 DATA ·escape_consts+88(SB)/8,  $0xE2E2E2E2E2E2E2E2
-DATA ·escape_consts+96(SB)/8,  $0x1F1F1F1F1F1F1F1F  // control threshold
-DATA ·escape_consts+104(SB)/8, $0x1F1F1F1F1F1F1F1F
-GLOBL ·escape_consts(SB), NOPTR, $112
+DATA ·escape_consts+96(SB)/8,  $0x8080808080808080  // 0x80 (U+2028/2029 second byte)
+DATA ·escape_consts+104(SB)/8, $0x8080808080808080
+DATA ·escape_consts+112(SB)/8, $0x1F1F1F1F1F1F1F1F  // control threshold
+DATA ·escape_consts+120(SB)/8, $0x1F1F1F1F1F1F1F1F
+GLOBL ·escape_consts(SB), NOPTR, $128
 
 // func simdFirstEscape(s string) int
 //
@@ -36,7 +38,8 @@ TEXT ·simdFirstEscape(SB), NOSPLIT, $0-24
 	MOVOU ·escape_consts+48(SB), X4  // >
 	MOVOU ·escape_consts+64(SB), X5  // &
 	MOVOU ·escape_consts+80(SB), X6  // 0xE2
-	MOVOU ·escape_consts+96(SB), X7  // 0x1F
+	MOVOU ·escape_consts+96(SB), X10 // 0x80
+	MOVOU ·escape_consts+112(SB), X7 // 0x1F
 
 chunkloop:
 	CMPQ CX, $16
@@ -60,11 +63,16 @@ chunkloop:
 	MOVO  X0, X9
 	PCMPEQB X5, X9          // &
 	POR   X9, X8
+	// only stop at 0xE2 when followed by 0x80
 	MOVO  X0, X9
-	PCMPEQB X6, X9          // 0xE2
-	POR   X9, X8
+	PCMPEQB X6, X9          // X9 = mask of 0xE2 positions
+	MOVO  X0, X11
+	PSRLDQ $1, X11          // X11[i] = X0[i+1], X11[15] = 0
+	PCMPEQB X10, X11        // X11 = mask of 0x80 at offset+1
+	PAND  X9, X11           // X11 = 0xE2 followed by 0x80
+	POR   X11, X8
 
-	// Control chars (byte <= 0x1F): sat(byte - 0x1F) is 0 exactly when
+	// control chars (byte <= 0x1F): sat(byte - 0x1F) is 0 exactly when
 	// byte <= 0x1F, so PCMPEQB against zero yields the mask.
 	MOVO  X0, X9
 	PSUBUSB X7, X9          // X9 = sat(byte - 0x1F)
@@ -75,9 +83,20 @@ chunkloop:
 	TESTL DX, DX
 	JNZ  found
 
+	// if last byte is 0xE2, back up so next chunk can check
+	MOVBQZX 15(SI), R8
+	CMPB R8, $0xE2
+	JE   last_is_e2
+
 	ADDQ $16, SI
 	SUBQ $16, CX
 	ADDQ $16, AX
+	JMP  chunkloop
+
+last_is_e2:
+	ADDQ $15, SI
+	SUBQ $15, CX
+	ADDQ $15, AX
 	JMP  chunkloop
 
 found:

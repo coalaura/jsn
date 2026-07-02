@@ -21,6 +21,7 @@ func appendInt64Fast(b []byte, n int64) []byte {
 	neg := n < 0
 
 	if neg {
+		// -n overflows int64, but uint64(-n) gives the correct magnitude (1<<63) via two's complement wraparound
 		u = uint64(-n)
 	} else {
 		u = uint64(n)

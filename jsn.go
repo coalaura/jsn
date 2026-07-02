@@ -20,9 +20,16 @@ const (
 	opString
 	opBool
 	opInt
+	opInt8
+	opInt16
+	opInt32
 	opInt64
 	opUint
+	opUint8
+	opUint16
+	opUint32
 	opUint64
+	opFloat32
 	opFloat64
 	opTime
 )
@@ -335,12 +342,32 @@ func (te *tapeEncoder) encode(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byt
 			}
 		case opInt:
 			b = appendInt64Fast(b, int64(*(*int)(fieldPtr)))
+		case opInt8:
+			b = appendInt64Fast(b, int64(*(*int8)(fieldPtr)))
+		case opInt16:
+			b = appendInt64Fast(b, int64(*(*int16)(fieldPtr)))
+		case opInt32:
+			b = appendInt64Fast(b, int64(*(*int32)(fieldPtr)))
 		case opInt64:
 			b = appendInt64Fast(b, *(*int64)(fieldPtr))
 		case opUint:
 			b = appendUint64Fast(b, uint64(*(*uint)(fieldPtr)))
+		case opUint8:
+			b = appendUint64Fast(b, uint64(*(*uint8)(fieldPtr)))
+		case opUint16:
+			b = appendUint64Fast(b, uint64(*(*uint16)(fieldPtr)))
+		case opUint32:
+			b = appendUint64Fast(b, uint64(*(*uint32)(fieldPtr)))
 		case opUint64:
 			b = appendUint64Fast(b, *(*uint64)(fieldPtr))
+		case opFloat32:
+			f32 := *(*float32)(fieldPtr)
+
+			if math.IsNaN(float64(f32)) || math.IsInf(float64(f32), 0) {
+				return b, &json.UnsupportedValueError{Value: reflect.ValueOf(float64(f32)), Str: strconv.FormatFloat(float64(f32), 'g', -1, 32)}
+			}
+
+			b = strconv.AppendFloat(b, float64(f32), 'g', -1, 32)
 		case opFloat64:
 			f64 := *(*float64)(fieldPtr)
 
@@ -1307,12 +1334,32 @@ func buildStructEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc)
 				}
 			case opInt:
 				b = appendInt64Fast(b, int64(*(*int)(fieldPtr)))
+			case opInt8:
+				b = appendInt64Fast(b, int64(*(*int8)(fieldPtr)))
+			case opInt16:
+				b = appendInt64Fast(b, int64(*(*int16)(fieldPtr)))
+			case opInt32:
+				b = appendInt64Fast(b, int64(*(*int32)(fieldPtr)))
 			case opInt64:
 				b = appendInt64Fast(b, *(*int64)(fieldPtr))
 			case opUint:
 				b = appendUint64Fast(b, uint64(*(*uint)(fieldPtr)))
+			case opUint8:
+				b = appendUint64Fast(b, uint64(*(*uint8)(fieldPtr)))
+			case opUint16:
+				b = appendUint64Fast(b, uint64(*(*uint16)(fieldPtr)))
+			case opUint32:
+				b = appendUint64Fast(b, uint64(*(*uint32)(fieldPtr)))
 			case opUint64:
 				b = appendUint64Fast(b, *(*uint64)(fieldPtr))
+			case opFloat32:
+				f32 := *(*float32)(fieldPtr)
+
+				if math.IsNaN(float64(f32)) || math.IsInf(float64(f32), 0) {
+					return b, &json.UnsupportedValueError{Value: reflect.ValueOf(float64(f32)), Str: strconv.FormatFloat(float64(f32), 'g', -1, 32)}
+				}
+
+				b = strconv.AppendFloat(b, float64(f32), 'g', -1, 32)
 			case opFloat64:
 				f64 := *(*float64)(fieldPtr)
 
@@ -1803,12 +1850,32 @@ func appendScalar(b []byte, op uint8, p unsafe.Pointer) ([]byte, error) {
 		return append(b, "false"...), nil
 	case opInt:
 		return appendInt64Fast(b, int64(*(*int)(p))), nil
+	case opInt8:
+		return appendInt64Fast(b, int64(*(*int8)(p))), nil
+	case opInt16:
+		return appendInt64Fast(b, int64(*(*int16)(p))), nil
+	case opInt32:
+		return appendInt64Fast(b, int64(*(*int32)(p))), nil
 	case opInt64:
 		return appendInt64Fast(b, *(*int64)(p)), nil
 	case opUint:
 		return appendUint64Fast(b, uint64(*(*uint)(p))), nil
+	case opUint8:
+		return appendUint64Fast(b, uint64(*(*uint8)(p))), nil
+	case opUint16:
+		return appendUint64Fast(b, uint64(*(*uint16)(p))), nil
+	case opUint32:
+		return appendUint64Fast(b, uint64(*(*uint32)(p))), nil
 	case opUint64:
 		return appendUint64Fast(b, *(*uint64)(p)), nil
+	case opFloat32:
+		f := float64(*(*float32)(p))
+
+		if math.IsNaN(f) || math.IsInf(f, 0) {
+			return b, &json.UnsupportedValueError{Value: reflect.ValueOf(f), Str: strconv.FormatFloat(f, 'g', -1, 32)}
+		}
+
+		return strconv.AppendFloat(b, f, 'g', -1, 32), nil
 	case opFloat64:
 		f := *(*float64)(p)
 
@@ -1843,12 +1910,26 @@ func scalarOp(t reflect.Type) uint8 {
 		return opBool
 	case reflect.Int:
 		return opInt
+	case reflect.Int8:
+		return opInt8
+	case reflect.Int16:
+		return opInt16
+	case reflect.Int32:
+		return opInt32
 	case reflect.Int64:
 		return opInt64
 	case reflect.Uint:
 		return opUint
+	case reflect.Uint8:
+		return opUint8
+	case reflect.Uint16:
+		return opUint16
+	case reflect.Uint32:
+		return opUint32
 	case reflect.Uint64:
 		return opUint64
+	case reflect.Float32:
+		return opFloat32
 	case reflect.Float64:
 		return opFloat64
 	}
