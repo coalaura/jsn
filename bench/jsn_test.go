@@ -33,6 +33,15 @@ func TestEncodeMatchesStdlib(t *testing.T) {
 		{"Document", docData, func(enc *jsn.Encoder) error {
 			return docEnc.Encode(enc, docData)
 		}},
+		{"PtrByteMarshaler", ptrMarshalerData, func(enc *jsn.Encoder) error {
+			return ptrMarshalerEnc.Encode(enc, ptrMarshalerData)
+		}},
+		{"WithEmbed", embedData, func(enc *jsn.Encoder) error {
+			return embedEnc.Encode(enc, embedData)
+		}},
+		{"WithRaw", rawData, func(enc *jsn.Encoder) error {
+			return rawEnc.Encode(enc, rawData)
+		}},
 	}
 
 	for _, tt := range tests {

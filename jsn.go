@@ -6,7 +6,6 @@ import (
 	"io"
 	"math"
 	"reflect"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -116,6 +115,7 @@ var (
 	timeType            = reflect.TypeFor[time.Time]()
 	isZeroerType        = reflect.TypeFor[isZeroer]()
 	byteSliceType       = reflect.TypeFor[[]byte]()
+	rawMessageType      = reflect.TypeFor[json.RawMessage]()
 	writerMarshalerType = reflect.TypeFor[WriterMarshaler]()
 	byteMarshalerType   = reflect.TypeFor[ByteMarshaler]()
 )
@@ -336,6 +336,21 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 	typPtr := extractTypePtr(tp)
 	isPtr := isPointerShaped(tp.Kind())
 
+	if tp == rawMessageType {
+		enc := func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
+			s := *(*json.RawMessage)(ptr)
+			if s == nil {
+				return append(b, "null"...), nil
+			}
+
+			return append(b, s...), nil
+		}
+
+		*pEnc = enc
+
+		return enc
+	}
+
 	// fast path for []byte -> Base64
 	if tp == byteSliceType {
 		enc := func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
@@ -345,21 +360,14 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 			}
 
 			b = append(b, '"')
-
-			encodedLen := base64.StdEncoding.EncodedLen(len(s))
-
-			b = slices.Grow(b, encodedLen)
-			start := len(b)
-
-			b = b[:start+encodedLen]
-
-			base64.StdEncoding.Encode(b[start:], s)
-
+			b = base64.StdEncoding.AppendEncode(b, s)
 			b = append(b, '"')
 
 			return b, nil
 		}
+
 		*pEnc = enc
+
 		return enc
 	}
 
@@ -380,13 +388,21 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 		return enc
 	}
 
-	if tp.Implements(writerMarshalerType) {
+	ptrTp := reflect.PointerTo(tp)
+	ptrTypPtr := extractTypePtr(ptrTp)
+
+	if tp.Implements(writerMarshalerType) || ptrTp.Implements(writerMarshalerType) {
+		recvTypPtr := typPtr
+		if !tp.Implements(writerMarshalerType) {
+			recvTypPtr = ptrTypPtr
+		}
+
 		enc := func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
 			var val any
 
 			ef := (*eface)(noescape(unsafe.Pointer(&val)))
 
-			ef.typ = typPtr
+			ef.typ = recvTypPtr
 
 			if isPtr {
 				ef.word = *(*unsafe.Pointer)(ptr)
@@ -409,13 +425,18 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 		return enc
 	}
 
-	if tp.Implements(byteMarshalerType) {
+	if tp.Implements(byteMarshalerType) || ptrTp.Implements(byteMarshalerType) {
+		recvTypPtr := typPtr
+		if !tp.Implements(byteMarshalerType) {
+			recvTypPtr = ptrTypPtr
+		}
+
 		enc := func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
 			var val any
 
 			ef := (*eface)(noescape(unsafe.Pointer(&val)))
 
-			ef.typ = typPtr
+			ef.typ = recvTypPtr
 
 			if isPtr {
 				ef.word = *(*unsafe.Pointer)(ptr)
@@ -448,43 +469,43 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 		}
 	case reflect.Int:
 		enc = func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
-			return strconv.AppendInt(b, int64(*(*int)(ptr)), 10), nil
+			return appendInt64Fast(b, int64(*(*int)(ptr))), nil
 		}
 	case reflect.Int8:
 		enc = func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
-			return strconv.AppendInt(b, int64(*(*int8)(ptr)), 10), nil
+			return appendInt64Fast(b, int64(*(*int8)(ptr))), nil
 		}
 	case reflect.Int16:
 		enc = func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
-			return strconv.AppendInt(b, int64(*(*int16)(ptr)), 10), nil
+			return appendInt64Fast(b, int64(*(*int16)(ptr))), nil
 		}
 	case reflect.Int32:
 		enc = func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
-			return strconv.AppendInt(b, int64(*(*int32)(ptr)), 10), nil
+			return appendInt64Fast(b, int64(*(*int32)(ptr))), nil
 		}
 	case reflect.Int64:
 		enc = func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
-			return strconv.AppendInt(b, *(*int64)(ptr), 10), nil
+			return appendInt64Fast(b, *(*int64)(ptr)), nil
 		}
 	case reflect.Uint:
 		enc = func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
-			return strconv.AppendUint(b, uint64(*(*uint)(ptr)), 10), nil
+			return appendUint64Fast(b, uint64(*(*uint)(ptr))), nil
 		}
 	case reflect.Uint8:
 		enc = func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
-			return strconv.AppendUint(b, uint64(*(*uint8)(ptr)), 10), nil
+			return appendUint64Fast(b, uint64(*(*uint8)(ptr))), nil
 		}
 	case reflect.Uint16:
 		enc = func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
-			return strconv.AppendUint(b, uint64(*(*uint16)(ptr)), 10), nil
+			return appendUint64Fast(b, uint64(*(*uint16)(ptr))), nil
 		}
 	case reflect.Uint32:
 		enc = func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
-			return strconv.AppendUint(b, uint64(*(*uint32)(ptr)), 10), nil
+			return appendUint64Fast(b, uint64(*(*uint32)(ptr))), nil
 		}
 	case reflect.Uint64:
 		enc = func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
-			return strconv.AppendUint(b, *(*uint64)(ptr), 10), nil
+			return appendUint64Fast(b, *(*uint64)(ptr)), nil
 		}
 	case reflect.Float32:
 		enc = func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
@@ -1026,9 +1047,7 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 	return enc
 }
 
-func buildStructEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encoderFunc {
-	var fields []structField
-
+func collectStructFields(tp reflect.Type, base uintptr, fields *[]structField, visiting map[reflect.Type]*encoderFunc) {
 	for sf := range tp.Fields() {
 		if !sf.IsExported() {
 			continue
@@ -1040,6 +1059,14 @@ func buildStructEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc)
 		}
 
 		name, opts, _ := strings.Cut(tag, ",")
+
+		// promote fields from embedded structs
+		if sf.Anonymous && name == "" && opts == "" && sf.Type.Kind() == reflect.Struct && !implementsAnyMarshaler(sf.Type) {
+			collectStructFields(sf.Type, base+sf.Offset, fields, visiting)
+
+			continue
+		}
+
 		if name == "" {
 			name = sf.Name
 		}
@@ -1047,7 +1074,7 @@ func buildStructEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc)
 		field := structField{
 			nameBytes: []byte(`,"` + name + `":`),
 			enc:       buildEncoder(sf.Type, visiting),
-			offset:    sf.Offset,
+			offset:    base + sf.Offset,
 		}
 
 		field.op, field.indirect = fieldOp(sf.Type)
@@ -1072,8 +1099,14 @@ func buildStructEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc)
 			field.isEmpty = buildIsZeroFunc(sf.Type)
 		}
 
-		fields = append(fields, field)
+		*fields = append(*fields, field)
 	}
+}
+
+func buildStructEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encoderFunc {
+	var fields []structField
+
+	collectStructFields(tp, 0, &fields, visiting)
 
 	return func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
 		mark := len(b)
@@ -1152,7 +1185,7 @@ func isFlattenable(tp reflect.Type) bool {
 		return false
 	}
 
-	if tp.Implements(writerMarshalerType) || tp.Implements(byteMarshalerType) {
+	if implementsAnyMarshaler(tp) {
 		return false
 	}
 
@@ -1166,8 +1199,13 @@ func isFlattenable(tp reflect.Type) bool {
 			continue
 		}
 
-		_, opts, _ := strings.Cut(tag, ",")
+		name, opts, _ := strings.Cut(tag, ",")
 		if strings.Contains(opts, "omitempty") || strings.Contains(opts, "omitzero") {
+			return false
+		}
+
+		// embedded fields promotion
+		if sf.Anonymous && name == "" && opts == "" && sf.Type.Kind() == reflect.Struct && !implementsAnyMarshaler(sf.Type) {
 			return false
 		}
 	}
@@ -1438,6 +1476,12 @@ func isPointerShaped(k reflect.Kind) bool {
 	return false
 }
 
+func implementsAnyMarshaler(t reflect.Type) bool {
+	pt := reflect.PointerTo(t)
+
+	return t.Implements(writerMarshalerType) || t.Implements(byteMarshalerType) || pt.Implements(writerMarshalerType) || pt.Implements(byteMarshalerType)
+}
+
 func writeString(b []byte, str string) []byte {
 	length := len(str)
 	if length == 0 {
@@ -1482,8 +1526,9 @@ func writeString(b []byte, str string) []byte {
 		for pos < length {
 			next := simdFirstEscape(str[pos:])
 
-			if next == len(str[pos:]) {
+			if next == length-pos {
 				b = append(b, str[pos:]...)
+
 				break
 			}
 
@@ -1628,7 +1673,7 @@ func scalarOp(t reflect.Type) uint8 {
 		return opTime
 	}
 
-	if t == byteSliceType || t.Implements(writerMarshalerType) || t.Implements(byteMarshalerType) {
+	if t == byteSliceType || t == rawMessageType || implementsAnyMarshaler(t) {
 		return opEnc
 	}
 

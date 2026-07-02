@@ -78,6 +78,29 @@ type Attachment struct {
 	Content []byte `json:"content"`
 }
 
+type PtrByteMarshaler struct {
+	Value string `json:"value"`
+}
+
+func (p *PtrByteMarshaler) MarshalJSON() ([]byte, error) {
+	return []byte(`{"custom":"` + p.Value + `"}`), nil
+}
+
+type Embedded struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+}
+
+type WithEmbed struct {
+	Embedded
+	Extra string `json:"extra"`
+}
+
+type WithRaw struct {
+	ID  int             `json:"id"`
+	Raw json.RawMessage `json:"raw"`
+}
+
 type Document struct {
 	ID          int64          `json:"id"`
 	Title       string         `json:"title"`
@@ -94,20 +117,26 @@ type Document struct {
 }
 
 var (
-	smallData    *Small
-	allTypesData *AllTypes
-	medData      *Medium
-	largeData    *Large
-	deepData     *Node
-	mapData      map[string]int64
-	docData      *Document
+	smallData        *Small
+	allTypesData     *AllTypes
+	medData          *Medium
+	largeData        *Large
+	deepData         *Node
+	mapData          map[string]int64
+	docData          *Document
+	ptrMarshalerData *PtrByteMarshaler
+	embedData        *WithEmbed
+	rawData          *WithRaw
 
-	smallEnc    = jsn.CompileTyped[Small]()
-	allTypesEnc = jsn.CompileTyped[AllTypes]()
-	medEnc      = jsn.CompileTyped[Medium]()
-	largeEnc    = jsn.CompileTyped[Large]()
-	deepEnc     = jsn.CompileTyped[Node]()
-	docEnc      = jsn.CompileTyped[Document]()
+	smallEnc        = jsn.CompileTyped[Small]()
+	allTypesEnc     = jsn.CompileTyped[AllTypes]()
+	medEnc          = jsn.CompileTyped[Medium]()
+	largeEnc        = jsn.CompileTyped[Large]()
+	deepEnc         = jsn.CompileTyped[Node]()
+	docEnc          = jsn.CompileTyped[Document]()
+	ptrMarshalerEnc = jsn.CompileTyped[PtrByteMarshaler]()
+	embedEnc        = jsn.CompileTyped[WithEmbed]()
+	rawEnc          = jsn.CompileTyped[WithRaw]()
 )
 
 func init() {
@@ -280,6 +309,10 @@ func init() {
 		Published: time.Date(2026, 7, 2, 1, 2, 21, 0, time.UTC),
 		Modified:  time.Date(2026, 7, 2, 5, 45, 41, 0, time.UTC),
 	}
+
+	ptrMarshalerData = &PtrByteMarshaler{Value: "hello"}
+	embedData = &WithEmbed{Embedded: Embedded{ID: 1, Name: "test"}, Extra: "data"}
+	rawData = &WithRaw{ID: 1, Raw: json.RawMessage(`{"nested":true,"val":42}`)}
 }
 
 func BenchmarkEncode_AllTypes_Std(b *testing.B) {
