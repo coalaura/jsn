@@ -23,4 +23,5 @@ set grid ytics
 #set yrange [0:50]
 plot \
 	"benchmark_result_jsn.txt" using 3:xticlabels(1) title "coalaura/jsn" with linespoints, \
-	"benchmark_result_std.txt" using 3:xticlabels(1) title "encoding/json" with linespoints
+	"benchmark_result_std.txt" using 3:xticlabels(1) title "encoding/json" with linespoints, \
+	"benchmark_result_std2.txt" using 3:xticlabels(1) title "encoding/json/v2" with linespoints

@@ -2,6 +2,8 @@ package jsn_test
 
 import (
 	"encoding/json"
+	"encoding/json/jsontext"
+	json2 "encoding/json/v2"
 	"io"
 	"strconv"
 	"testing"
@@ -146,6 +148,21 @@ func BenchmarkEncode_AllTypes_Std(b *testing.B) {
 	}
 }
 
+func BenchmarkEncode_AllTypes_Std2(b *testing.B) {
+	enc := jsontext.NewEncoder(io.Discard)
+
+	for range 1000 {
+		_ = json2.MarshalEncode(enc, allTypesData)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		_ = json2.MarshalEncode(enc, allTypesData)
+	}
+}
+
 func BenchmarkEncode_AllTypes_Jsn(b *testing.B) {
 	enc := jsn.NewEncoder(io.Discard)
 
@@ -173,6 +190,21 @@ func BenchmarkEncode_Small_Std(b *testing.B) {
 
 	for b.Loop() {
 		_ = enc.Encode(smallData)
+	}
+}
+
+func BenchmarkEncode_Small_Std2(b *testing.B) {
+	enc := jsontext.NewEncoder(io.Discard)
+
+	for range 1000 {
+		_ = json2.MarshalEncode(enc, smallData)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		_ = json2.MarshalEncode(enc, smallData)
 	}
 }
 
@@ -206,6 +238,21 @@ func BenchmarkEncode_Medium_Std(b *testing.B) {
 	}
 }
 
+func BenchmarkEncode_Medium_Std2(b *testing.B) {
+	enc := jsontext.NewEncoder(io.Discard)
+
+	for range 500 {
+		_ = json2.MarshalEncode(enc, medData)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		_ = json2.MarshalEncode(enc, medData)
+	}
+}
+
 func BenchmarkEncode_Medium_Jsn(b *testing.B) {
 	enc := jsn.NewEncoder(io.Discard)
 
@@ -233,6 +280,21 @@ func BenchmarkEncode_Large_Std(b *testing.B) {
 
 	for b.Loop() {
 		_ = enc.Encode(largeData)
+	}
+}
+
+func BenchmarkEncode_Large_Std2(b *testing.B) {
+	enc := jsontext.NewEncoder(io.Discard)
+
+	for range 100 {
+		_ = json2.MarshalEncode(enc, largeData)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		_ = json2.MarshalEncode(enc, largeData)
 	}
 }
 
@@ -266,6 +328,21 @@ func BenchmarkEncode_Deep_Std(b *testing.B) {
 	}
 }
 
+func BenchmarkEncode_Deep_Std2(b *testing.B) {
+	enc := jsontext.NewEncoder(io.Discard)
+
+	for range 100 {
+		_ = json2.MarshalEncode(enc, deepData)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		_ = json2.MarshalEncode(enc, deepData)
+	}
+}
+
 func BenchmarkEncode_Deep_Jsn(b *testing.B) {
 	enc := jsn.NewEncoder(io.Discard)
 
@@ -293,6 +370,21 @@ func BenchmarkEncode_Map_Std(b *testing.B) {
 
 	for b.Loop() {
 		_ = enc.Encode(mapData)
+	}
+}
+
+func BenchmarkEncode_Map_Std2(b *testing.B) {
+	enc := jsontext.NewEncoder(io.Discard)
+
+	for range 500 {
+		_ = json2.MarshalEncode(enc, mapData)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		_ = json2.MarshalEncode(enc, mapData)
 	}
 }
 

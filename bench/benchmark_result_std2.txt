@@ -1,0 +1,9 @@
+# GOEXPERIMENT=jsonv2 go test -bench=_Std2$ -benchtime=5s
+
+# name, run times, speed, ns/op
+alltypes         8873978               672.5 ns/op            56 B/op          4 allocs/op
+small           30242100               197.4 ns/op             0 B/op          0 allocs/op
+medium           8162562               735.3 ns/op            24 B/op          2 allocs/op
+large              38502            155954 ns/op            4832 B/op        402 allocs/op
+deep             2647935              2273 ns/op               0 B/op          0 allocs/op
+map               803025              7520 ns/op              32 B/op          3 allocs/op
