@@ -48,9 +48,14 @@ type ByteMarshaler interface {
 // produces zero allocations in steady state. An Encoder is not safe for
 // concurrent use.
 type Encoder struct {
-	buf     []byte
-	wr      io.Writer
-	scratch unsafe.Pointer // heap-resident slot for pointer-shaped interface words
+	buf            []byte
+	wr             io.Writer
+	flushThreshold int
+
+	// scratch holds pointer-shaped interface words during encodeAny.
+	// Re-entrant safe: the outer call dereferences &scratch before any
+	// nested call can overwrite it.
+	scratch unsafe.Pointer
 }
 
 // TypedEncoder is a pre-compiled encoder bound to T at the type level.
@@ -92,6 +97,8 @@ type structField struct {
 	op        uint8
 }
 
+// eface mirrors the runtime's two-word interface layout.
+// Stable since Go 1.0 but not spec-guaranteed.
 type eface struct {
 	typ  unsafe.Pointer
 	word unsafe.Pointer
@@ -134,6 +141,10 @@ func init() {
 	safeSet[0xE2] = 0
 }
 
+// noescape hides a pointer from escape analysis via uintptr.
+// Used to build interface values on the stack without allocating.
+// The value must be consumed before the caller returns.
+//
 //go:nosplit
 func noescape(ptr unsafe.Pointer) unsafe.Pointer {
 	uiPtr := uintptr(ptr)
@@ -150,22 +161,24 @@ func CompileTyped[T any]() *TypedEncoder[T] {
 }
 
 // NewEncoder returns a new Encoder that writes JSON values to wr,
-// pre-allocating a 1KB internal buffer.
+// pre-allocating a 1KB internal buffer. The encoder streams to wr in
+// 4KB chunks; wrap wr in a bytes.Buffer if you need full buffering.
 func NewEncoder(wr io.Writer) *Encoder {
 	return &Encoder{
-		wr:  wr,
-		buf: make([]byte, 0, 1024),
+		wr:             wr,
+		buf:            make([]byte, 0, 1024),
+		flushThreshold: 4096,
 	}
 }
 
 // Encode writes the JSON encoding of *v followed by a newline.
+// On error, data already flushed to the underlying writer is not
+// rolled back.
 func (te *TypedEncoder[T]) Encode(e *Encoder, v *T) error {
 	if v == nil {
-		b := append(e.buf[:0], "null\n"...)
-		e.buf = b
+		e.buf = append(e.buf[:0], "null\n"...)
 
-		_, err := e.wr.Write(b)
-		return err
+		return e.Flush()
 	}
 
 	b, err := te.enc(e, e.buf[:0], unsafe.Pointer(v))
@@ -175,16 +188,17 @@ func (te *TypedEncoder[T]) Encode(e *Encoder, v *T) error {
 		return err
 	}
 
-	b = append(b, '\n')
-	e.buf = b
+	e.buf = append(b, '\n')
 
-	_, err = e.wr.Write(b)
-	return err
+	return e.Flush()
 }
 
 // Encode writes the JSON encoding of val followed by a newline to the
 // underlying writer. The dynamic type of val is looked up in the encoder
-// cache; for hot paths prefer EncodeAs with a compiled TypeEncoder.
+// cache; for hot paths prefer CompileTyped.
+//
+// On error, data already flushed to the underlying writer is not
+// rolled back.
 func (e *Encoder) Encode(val any) error {
 	b := e.buf[:0]
 
@@ -197,11 +211,9 @@ func (e *Encoder) Encode(val any) error {
 		return err
 	}
 
-	b = append(b, '\n')
-	e.buf = b
+	e.buf = append(b, '\n')
 
-	_, err = e.wr.Write(b)
-	return err
+	return e.Flush()
 }
 
 // Write implements io.Writer by appending p to the internal buffer.
@@ -210,7 +222,42 @@ func (e *Encoder) Encode(val any) error {
 func (e *Encoder) Write(p []byte) (int, error) {
 	e.buf = append(e.buf, p...)
 
+	if len(e.buf) >= e.flushThreshold {
+		_, err := e.wr.Write(e.buf)
+		if err != nil {
+			return 0, err
+		}
+
+		e.buf = e.buf[:0]
+	}
+
 	return len(p), nil
+}
+
+// Flush writes any buffered data to the underlying writer.
+func (e *Encoder) Flush() error {
+	if len(e.buf) > 0 {
+		_, err := e.wr.Write(e.buf)
+
+		e.buf = e.buf[:0]
+
+		return err
+	}
+
+	return nil
+}
+
+func (e *Encoder) maybeFlush(b []byte) ([]byte, error) {
+	if len(b) >= e.flushThreshold {
+		_, err := e.wr.Write(b)
+		if err != nil {
+			return b, err
+		}
+
+		return b[:0], nil
+	}
+
+	return b, nil
 }
 
 func getEncoder(tp reflect.Type) *cachedEncoder {
@@ -550,9 +597,16 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 				b = append(b, '[')
 				b = writeString(b, s[0])
 
+				var err error
+
 				for _, str := range s[1:] {
 					b = append(b, ',')
 					b = writeString(b, str)
+
+					b, err = enc.maybeFlush(b)
+					if err != nil {
+						return b, err
+					}
 				}
 
 				return append(b, ']'), nil
@@ -586,10 +640,20 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 					return b, err
 				}
 
+				b, err = enc.maybeFlush(b)
+				if err != nil {
+					return b, err
+				}
+
 				for i := 1; i < sh.Len; i++ {
 					b = append(b, ',')
 
 					b, err = te.encode(enc, b, unsafe.Add(sh.Data, uintptr(i)*elemSize))
+					if err != nil {
+						return b, err
+					}
+
+					b, err = enc.maybeFlush(b)
 					if err != nil {
 						return b, err
 					}
@@ -625,10 +689,20 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 					return b, err
 				}
 
+				b, err = enc.maybeFlush(b)
+				if err != nil {
+					return b, err
+				}
+
 				for i := 1; i < sh.Len; i++ {
 					b = append(b, ',')
 
 					b, err = appendScalar(b, op, unsafe.Add(sh.Data, uintptr(i)*elemSize))
+					if err != nil {
+						return b, err
+					}
+
+					b, err = enc.maybeFlush(b)
 					if err != nil {
 						return b, err
 					}
@@ -664,12 +738,22 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 				return b, err
 			}
 
+			b, err = enc.maybeFlush(b)
+			if err != nil {
+				return b, err
+			}
+
 			for i := 1; i < sh.Len; i++ {
 				b = append(b, ',')
 
 				elemPtr := unsafe.Add(sh.Data, uintptr(i)*elemSize)
 
 				b, err = elemEnc(enc, b, elemPtr)
+				if err != nil {
+					return b, err
+				}
+
+				b, err = enc.maybeFlush(b)
 				if err != nil {
 					return b, err
 				}
@@ -687,12 +771,17 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 
 				var err error
 
-				for i := 0; i < length; i++ {
+				for i := range length {
 					if i > 0 {
 						b = append(b, ',')
 					}
 
 					b, err = appendScalar(b, op, unsafe.Add(ptr, uintptr(i)*elemSize))
+					if err != nil {
+						return b, err
+					}
+
+					b, err = enc.maybeFlush(b)
 					if err != nil {
 						return b, err
 					}
@@ -721,12 +810,22 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 				return b, err
 			}
 
+			b, err = enc.maybeFlush(b)
+			if err != nil {
+				return b, err
+			}
+
 			for i := 1; i < length; i++ {
 				b = append(b, ',')
 
 				elemPtr := unsafe.Add(ptr, uintptr(i)*elemSize)
 
 				b, err = elemEnc(enc, b, elemPtr)
+				if err != nil {
+					return b, err
+				}
+
+				b, err = enc.maybeFlush(b)
 				if err != nil {
 					return b, err
 				}
@@ -744,20 +843,28 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 						return append(b, "null"...), nil
 					}
 
-					mark := len(b)
+					b = append(b, '{')
+
+					first := true
+
+					var err error
 
 					for k, val := range m {
-						b = append(b, ',')
+						if !first {
+							b = append(b, ',')
+						}
+
+						first = false
+
 						b = writeString(b, k)
 						b = append(b, ':')
 						b = writeString(b, val)
-					}
 
-					if len(b) == mark {
-						return append(b, '{', '}'), nil
+						b, err = enc.maybeFlush(b)
+						if err != nil {
+							return b, err
+						}
 					}
-
-					b[mark] = '{'
 
 					return append(b, '}'), nil
 				}
@@ -772,20 +879,28 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 						return append(b, "null"...), nil
 					}
 
-					mark := len(b)
+					b = append(b, '{')
+
+					first := true
+
+					var err error
 
 					for k, val := range m {
-						b = append(b, ',')
+						if !first {
+							b = append(b, ',')
+						}
+
+						first = false
+
 						b = writeString(b, k)
 						b = append(b, ':')
 						b = appendInt64Fast(b, val)
-					}
 
-					if len(b) == mark {
-						return append(b, '{', '}'), nil
+						b, err = enc.maybeFlush(b)
+						if err != nil {
+							return b, err
+						}
 					}
-
-					b[mark] = '{'
 
 					return append(b, '}'), nil
 				}
@@ -800,20 +915,28 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 						return append(b, "null"...), nil
 					}
 
-					mark := len(b)
+					b = append(b, '{')
+
+					first := true
+
+					var err error
 
 					for k, val := range m {
-						b = append(b, ',')
+						if !first {
+							b = append(b, ',')
+						}
+
+						first = false
+
 						b = writeString(b, k)
 						b = append(b, ':')
 						b = appendInt64Fast(b, int64(val))
-					}
 
-					if len(b) == mark {
-						return append(b, '{', '}'), nil
+						b, err = enc.maybeFlush(b)
+						if err != nil {
+							return b, err
+						}
 					}
-
-					b[mark] = '{'
 
 					return append(b, '}'), nil
 				}
@@ -828,20 +951,28 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 						return append(b, "null"...), nil
 					}
 
-					mark := len(b)
+					b = append(b, '{')
+
+					first := true
+
+					var err error
 
 					for k, val := range m {
-						b = append(b, ',')
+						if !first {
+							b = append(b, ',')
+						}
+
+						first = false
+
 						b = writeString(b, k)
 						b = append(b, ':')
 						b = appendUint64Fast(b, val)
-					}
 
-					if len(b) == mark {
-						return append(b, '{', '}'), nil
+						b, err = enc.maybeFlush(b)
+						if err != nil {
+							return b, err
+						}
 					}
-
-					b[mark] = '{'
 
 					return append(b, '}'), nil
 				}
@@ -856,10 +987,19 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 						return append(b, "null"...), nil
 					}
 
-					mark := len(b)
+					b = append(b, '{')
+
+					first := true
+
+					var err error
 
 					for k, val := range m {
-						b = append(b, ',')
+						if !first {
+							b = append(b, ',')
+						}
+
+						first = false
+
 						b = writeString(b, k)
 						b = append(b, ':')
 
@@ -868,13 +1008,12 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 						}
 
 						b = strconv.AppendFloat(b, val, 'g', -1, 64)
-					}
 
-					if len(b) == mark {
-						return append(b, '{', '}'), nil
+						b, err = enc.maybeFlush(b)
+						if err != nil {
+							return b, err
+						}
 					}
-
-					b[mark] = '{'
 
 					return append(b, '}'), nil
 				}
@@ -889,10 +1028,19 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 						return append(b, "null"...), nil
 					}
 
-					mark := len(b)
+					b = append(b, '{')
+
+					first := true
+
+					var err error
 
 					for k, val := range m {
-						b = append(b, ',')
+						if !first {
+							b = append(b, ',')
+						}
+
+						first = false
+
 						b = writeString(b, k)
 						b = append(b, ':')
 
@@ -901,13 +1049,12 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 						} else {
 							b = append(b, "false"...)
 						}
-					}
 
-					if len(b) == mark {
-						return append(b, '{', '}'), nil
+						b, err = enc.maybeFlush(b)
+						if err != nil {
+							return b, err
+						}
 					}
-
-					b[mark] = '{'
 
 					return append(b, '}'), nil
 				}
@@ -922,26 +1069,32 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 						return append(b, "null"...), nil
 					}
 
-					mark := len(b)
+					b = append(b, '{')
+
+					first := true
+
+					var err error
 
 					for k, val := range m {
-						b = append(b, ',')
+						if !first {
+							b = append(b, ',')
+						}
+
+						first = false
+
 						b = writeString(b, k)
 						b = append(b, ':')
-
-						var err error
 
 						b, err = enc.encodeAny(b, val)
 						if err != nil {
 							return b, err
 						}
-					}
 
-					if len(b) == mark {
-						return append(b, '{', '}'), nil
+						b, err = enc.maybeFlush(b)
+						if err != nil {
+							return b, err
+						}
 					}
-
-					b[mark] = '{'
 
 					return append(b, '}'), nil
 				}
@@ -993,6 +1146,11 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 				var err error
 
 				b, err = enc.encodeAny(b, iter.Value().Interface())
+				if err != nil {
+					return b, err
+				}
+
+				b, err = enc.maybeFlush(b)
 				if err != nil {
 					return b, err
 				}
@@ -1109,7 +1267,9 @@ func buildStructEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc)
 	collectStructFields(tp, 0, &fields, visiting)
 
 	return func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
-		mark := len(b)
+		b = append(b, '{')
+
+		first := true
 
 		for i := range fields {
 			field := &fields[i]
@@ -1120,7 +1280,12 @@ func buildStructEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc)
 				continue
 			}
 
-			b = append(b, field.nameBytes...)
+			if first {
+				b = append(b, field.nameBytes[1:]...)
+				first = false
+			} else {
+				b = append(b, field.nameBytes...)
+			}
 
 			if field.indirect {
 				fieldPtr = *(*unsafe.Pointer)(fieldPtr)
@@ -1169,12 +1334,6 @@ func buildStructEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc)
 				}
 			}
 		}
-
-		if len(b) == mark {
-			return append(b, '{', '}'), nil
-		}
-
-		b[mark] = '{'
 
 		return append(b, '}'), nil
 	}
