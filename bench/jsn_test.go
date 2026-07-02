@@ -30,6 +30,9 @@ func TestEncodeMatchesStdlib(t *testing.T) {
 			return deepEnc.Encode(enc, deepData)
 		}},
 		{"Map", mapData, nil},
+		{"Document", docData, func(enc *jsn.Encoder) error {
+			return docEnc.Encode(enc, docData)
+		}},
 	}
 
 	for _, tt := range tests {

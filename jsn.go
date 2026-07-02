@@ -287,9 +287,9 @@ func (te *tapeEncoder) encode(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byt
 				b = append(b, "false"...)
 			}
 		case opInt:
-			b = strconv.AppendInt(b, int64(*(*int)(fieldPtr)), 10)
+			b = appendInt64Fast(b, int64(*(*int)(fieldPtr)))
 		case opInt64:
-			b = strconv.AppendInt(b, *(*int64)(fieldPtr), 10)
+			b = appendInt64Fast(b, *(*int64)(fieldPtr))
 		case opUint:
 			b = strconv.AppendUint(b, uint64(*(*uint)(fieldPtr)), 10)
 		case opUint64:
@@ -757,7 +757,7 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 						b = append(b, ',')
 						b = writeString(b, k)
 						b = append(b, ':')
-						b = strconv.AppendInt(b, val, 10)
+						b = appendInt64Fast(b, val)
 					}
 
 					if len(b) == mark {
@@ -986,9 +986,9 @@ func buildStructEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc)
 					b = append(b, "false"...)
 				}
 			case opInt:
-				b = strconv.AppendInt(b, int64(*(*int)(fieldPtr)), 10)
+				b = appendInt64Fast(b, int64(*(*int)(fieldPtr)))
 			case opInt64:
-				b = strconv.AppendInt(b, *(*int64)(fieldPtr), 10)
+				b = appendInt64Fast(b, *(*int64)(fieldPtr))
 			case opUint:
 				b = strconv.AppendUint(b, uint64(*(*uint)(fieldPtr)), 10)
 			case opUint64:
@@ -1324,12 +1324,11 @@ func writeString(b []byte, str string) []byte {
 
 	b = append(b, '"')
 
-	// BCE
-	_ = str[length-1]
-
 	var safeEnd int
 
-	for safeEnd+8 <= length {
+	inlineLimit := min(length, 48)
+
+	for safeEnd+8 <= inlineLimit {
 		if safeSet[str[safeEnd]]&safeSet[str[safeEnd+1]]&safeSet[str[safeEnd+2]]&safeSet[str[safeEnd+3]]&safeSet[str[safeEnd+4]]&safeSet[str[safeEnd+5]]&safeSet[str[safeEnd+6]]&safeSet[str[safeEnd+7]] == 0 {
 			break
 		}
@@ -1337,10 +1336,15 @@ func writeString(b []byte, str string) []byte {
 		safeEnd += 8
 	}
 
-	for ; safeEnd < length; safeEnd++ {
+	for ; safeEnd < inlineLimit; safeEnd++ {
 		if safeSet[str[safeEnd]] == 0 {
 			break
 		}
+	}
+
+	// First 48 bytes are clean and there's more to scan - SIMD the rest.
+	if safeEnd == 48 && length > 48 {
+		safeEnd += simdFirstEscape(str[48:])
 	}
 
 	if safeEnd == length {
@@ -1426,9 +1430,9 @@ func appendScalar(b []byte, op uint8, p unsafe.Pointer) ([]byte, error) {
 
 		return append(b, "false"...), nil
 	case opInt:
-		return strconv.AppendInt(b, int64(*(*int)(p)), 10), nil
+		return appendInt64Fast(b, int64(*(*int)(p))), nil
 	case opInt64:
-		return strconv.AppendInt(b, *(*int64)(p), 10), nil
+		return appendInt64Fast(b, *(*int64)(p)), nil
 	case opUint:
 		return strconv.AppendUint(b, uint64(*(*uint)(p)), 10), nil
 	case opUint64:

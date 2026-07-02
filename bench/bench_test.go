@@ -51,6 +51,48 @@ type Large struct {
 	Extra map[string]string `json:"extra"`
 }
 
+type Author struct {
+	Name  string `json:"name"`
+	Email string `json:"email"`
+	Bio   string `json:"bio"`
+}
+
+type Comment struct {
+	ID      int64  `json:"id"`
+	Author  Author `json:"author"`
+	Body    string `json:"body"`
+	Upvotes int64  `json:"upvotes"`
+}
+
+type DocumentStats struct {
+	Views    int64   `json:"views"`
+	Likes    int64   `json:"likes"`
+	Shares   int64   `json:"shares"`
+	Rating   float64 `json:"rating"`
+	Featured bool    `json:"featured"`
+}
+
+type Attachment struct {
+	Name    string `json:"name"`
+	Type    string `json:"type"`
+	Content []byte `json:"content"`
+}
+
+type Document struct {
+	ID          int64          `json:"id"`
+	Title       string         `json:"title"`
+	Slug        string         `json:"slug"`
+	Body        string         `json:"body"`
+	Tags        []string       `json:"tags"`
+	Author      Author         `json:"author"`
+	Stats       DocumentStats  `json:"stats"`
+	Metadata    map[string]any `json:"metadata"`
+	Comments    []Comment      `json:"comments"`
+	Attachments []Attachment   `json:"attachments"`
+	Published   time.Time      `json:"published"`
+	Modified    time.Time      `json:"modified"`
+}
+
 var (
 	smallData    *Small
 	allTypesData *AllTypes
@@ -58,12 +100,14 @@ var (
 	largeData    *Large
 	deepData     *Node
 	mapData      map[string]int64
+	docData      *Document
 
 	smallEnc    = jsn.CompileTyped[Small]()
 	allTypesEnc = jsn.CompileTyped[AllTypes]()
 	medEnc      = jsn.CompileTyped[Medium]()
 	largeEnc    = jsn.CompileTyped[Large]()
 	deepEnc     = jsn.CompileTyped[Node]()
+	docEnc      = jsn.CompileTyped[Document]()
 )
 
 func init() {
@@ -130,6 +174,111 @@ func init() {
 
 	for i := range 200 {
 		mapData[strconv.Itoa(i)] = int64(i)
+	}
+
+	paragraphs := []string{
+		// ascii
+		"The quick brown fox jumps over the lazy dog near the riverbank on a sunny afternoon while children play nearby.",
+
+		// quotes and backslashes
+		"The system reported \"critical\" status at C:\\Program Files\\app\\logs\\error.log when the process exited with code 42.",
+
+		// unicode
+		"Unicode characters include \u2605 star \u00e9 cafe \u00fc uber \u4e2d\u6587 Chinese \u65e5\u672c\u8a9e Japanese \U0001F600 emoji here.",
+
+		// json-special unicode (U+2028/U+2029)
+		"Line separator \u2028 and paragraph separator \u2029 must be escaped in JSON output to avoid breaking JavaScript parsers.",
+
+		// html-like
+		"HTML content: <div class=\"widget\">&amp;</div> with <script>alert('xss')</script> and <img src='x' onerror='evil()'> tags.",
+
+		// regex patterns
+		"Regex patterns like \\d{3}-\\d{4} for phone numbers, \\w+@\\w+\\.\\w+ for emails, \\bword\\b for word boundaries in text.",
+
+		// dense special characters
+		"Mixed special chars: @#$%^&*(){}[]|;:'\",.<>?/\\~` plus \"quotes\" and 'apostrophes' and back\\slashes everywhere.",
+
+		// control characters
+		"Control characters: tab\there, newline\nhere, carriage\rreturn, and even a null\x00byte need proper JSON escaping.",
+
+		// numbers in text
+		"Numeric values like 42, 3.14159, -273.15, 1e10, 6.022e23, 0xDEADBEEF appear naturally in technical documentation and logs.",
+
+		// long pure ascii
+		"This particular paragraph has absolutely no characters that need escaping whatsoever so the SIMD scanner should blaze through it without finding any matches and return the full length immediately without entering the slow path at all which is the best case scenario for throughput testing in our JSON encoder benchmark suite.",
+	}
+
+	var body string
+
+	for i := range 300 {
+		if i > 0 {
+			body += "\n\n"
+		}
+
+		body += paragraphs[i%len(paragraphs)]
+	}
+
+	comments := make([]Comment, 50)
+
+	for i := range 50 {
+		comments[i] = Comment{
+			ID: int64(i + 1),
+			Author: Author{
+				Name:  "user_" + strconv.Itoa(i),
+				Email: "user" + strconv.Itoa(i) + "@example.com",
+				Bio:   "A \"brief\" bio with \\backslashes\\ and \n newlines.",
+			},
+			Body:    paragraphs[i%len(paragraphs)],
+			Upvotes: int64(i * 7 % 1000),
+		}
+	}
+
+	pngContent := make([]byte, 256)
+
+	for i := range pngContent {
+		pngContent[i] = byte(i)
+	}
+
+	binContent := make([]byte, 512)
+
+	for i := range binContent {
+		binContent[i] = byte(i * 7)
+	}
+
+	docData = &Document{
+		ID:    48213,
+		Title: "Deep Dive: \"High-Performance\" JSON Encoding in Go",
+		Slug:  "deep-dive-json-encoding-go",
+		Body:  body,
+		Tags:  []string{"go", "json", "performance", "simd", "assembly"},
+		Author: Author{
+			Name:  "Jane \"Code\" Doe",
+			Email: "jane@example.com",
+			Bio:   "Systems engineer specializing in \\low-level\\ optimization and \U0001F680 performance.",
+		},
+		Stats: DocumentStats{
+			Views:    48213,
+			Likes:    1294,
+			Shares:   87,
+			Rating:   4.7,
+			Featured: true,
+		},
+		Metadata: map[string]any{
+			"version":      "1.2.3",
+			"word_count":   int64(48213),
+			"read_minutes": int64(15),
+			"featured":     true,
+			"rating":       4.7,
+			"categories":   []string{"engineering", "go", "performance"},
+			"license":      "MIT",
+		},
+		Comments: comments,
+		Attachments: []Attachment{
+			{Name: "diagram.png", Type: "image/png", Content: pngContent},
+			{Name: "data.bin", Type: "application/octet-stream", Content: binContent},
+		},
+		Published: time.Date(2026, 7, 2, 1, 2, 21, 0, time.UTC),
+		Modified:  time.Date(2026, 7, 2, 5, 45, 41, 0, time.UTC),
 	}
 }
 
@@ -400,5 +549,50 @@ func BenchmarkEncode_Map_Jsn(b *testing.B) {
 
 	for b.Loop() {
 		_ = enc.Encode(mapData)
+	}
+}
+
+func BenchmarkEncode_Document_Std(b *testing.B) {
+	enc := json.NewEncoder(io.Discard)
+
+	for range 100 {
+		_ = enc.Encode(docData)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		_ = enc.Encode(docData)
+	}
+}
+
+func BenchmarkEncode_Document_Std2(b *testing.B) {
+	enc := jsontext.NewEncoder(io.Discard)
+
+	for range 100 {
+		_ = json2.MarshalEncode(enc, docData)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		_ = json2.MarshalEncode(enc, docData)
+	}
+}
+
+func BenchmarkEncode_Document_Jsn(b *testing.B) {
+	enc := jsn.NewEncoder(io.Discard)
+
+	for range 100 {
+		_ = docEnc.Encode(enc, docData)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		_ = docEnc.Encode(enc, docData)
 	}
 }
