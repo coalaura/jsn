@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"math"
 	"reflect"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unsafe"
 )
@@ -130,12 +132,16 @@ type sliceHeader struct {
 	Cap  int
 }
 
+type cacheMap struct {
+	m atomic.Pointer[map[uintptr]*cachedEncoder]
+}
+
 var ErrTimeOutOfRange = errors.New("jsn: time.Time year outside of range [0,9999]")
 
 var (
 	safeSet [256]byte
 
-	cache hashTrieMap
+	cache cacheMap
 
 	timeType            = reflect.TypeFor[time.Time]()
 	isZeroerType        = reflect.TypeFor[isZeroer]()
@@ -186,6 +192,48 @@ func NewEncoder(wr io.Writer) *Encoder {
 		wr:             wr,
 		buf:            make([]byte, 0, 1024),
 		flushThreshold: 4096,
+	}
+}
+
+func (c *cacheMap) load(key uintptr) (*cachedEncoder, bool) {
+	if m := c.m.Load(); m != nil {
+		if v, ok := (*m)[key]; ok {
+			return v, true
+		}
+	}
+
+	return nil, false
+}
+
+func (c *cacheMap) loadOrStore(key uintptr, value *cachedEncoder) (*cachedEncoder, bool) {
+	if v, ok := c.load(key); ok {
+		return v, true
+	}
+
+	for {
+		old := c.m.Load()
+
+		var oldMap map[uintptr]*cachedEncoder
+
+		if old != nil {
+			oldMap = *old
+		}
+
+		if existing, ok := oldMap[key]; ok {
+			return existing, true
+		}
+
+		newMap := maps.Clone(oldMap)
+
+		if newMap == nil {
+			newMap = make(map[uintptr]*cachedEncoder, 1)
+		}
+
+		newMap[key] = value
+
+		if c.m.CompareAndSwap(old, &newMap) {
+			return value, false
+		}
 	}
 }
 
@@ -281,7 +329,7 @@ func (e *Encoder) maybeFlush(b []byte) ([]byte, error) {
 func getEncoder(tp reflect.Type) *cachedEncoder {
 	key := uintptr(extractTypePtr(tp))
 
-	if ce, ok := cache.Load(key); ok {
+	if ce, ok := cache.load(key); ok {
 		return ce
 	}
 
@@ -292,7 +340,7 @@ func getEncoder(tp reflect.Type) *cachedEncoder {
 		isPtr: isPointerShaped(tp.Kind()),
 	}
 
-	actual, _ := cache.LoadOrStore(key, ce)
+	actual, _ := cache.loadOrStore(key, ce)
 
 	return actual
 }
@@ -303,7 +351,7 @@ func (e *Encoder) encodeAny(b []byte, val any) ([]byte, error) {
 		return append(b, "null"...), nil
 	}
 
-	ce, ok := cache.Load(uintptr(ef.typ))
+	ce, ok := cache.load(uintptr(ef.typ))
 	if !ok {
 		ce = getEncoder(reflect.TypeOf(val))
 	}
@@ -1338,65 +1386,16 @@ func buildStructEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc)
 				}
 			}
 
-			switch field.op {
-			case opString:
-				b = writeString(b, *(*string)(fieldPtr))
-			case opBool:
-				if *(*bool)(fieldPtr) {
-					b = append(b, "true"...)
-				} else {
-					b = append(b, "false"...)
-				}
-			case opInt:
-				b = appendInt64Fast(b, int64(*(*int)(fieldPtr)))
-			case opInt8:
-				b = appendInt64Fast(b, int64(*(*int8)(fieldPtr)))
-			case opInt16:
-				b = appendInt64Fast(b, int64(*(*int16)(fieldPtr)))
-			case opInt32:
-				b = appendInt64Fast(b, int64(*(*int32)(fieldPtr)))
-			case opInt64:
-				b = appendInt64Fast(b, *(*int64)(fieldPtr))
-			case opUint:
-				b = appendUint64Fast(b, uint64(*(*uint)(fieldPtr)))
-			case opUint8:
-				b = appendUint64Fast(b, uint64(*(*uint8)(fieldPtr)))
-			case opUint16:
-				b = appendUint64Fast(b, uint64(*(*uint16)(fieldPtr)))
-			case opUint32:
-				b = appendUint64Fast(b, uint64(*(*uint32)(fieldPtr)))
-			case opUint64:
-				b = appendUint64Fast(b, *(*uint64)(fieldPtr))
-			case opFloat32:
-				f32 := *(*float32)(fieldPtr)
+			var err error
 
-				if math.IsNaN(float64(f32)) || math.IsInf(float64(f32), 0) {
-					return b, &json.UnsupportedValueError{Value: reflect.ValueOf(float64(f32)), Str: strconv.FormatFloat(float64(f32), 'g', -1, 32)}
-				}
-
-				b = strconv.AppendFloat(b, float64(f32), 'g', -1, 32)
-			case opFloat64:
-				f64 := *(*float64)(fieldPtr)
-
-				if math.IsNaN(f64) || math.IsInf(f64, 0) {
-					return b, &json.UnsupportedValueError{Value: reflect.ValueOf(f64), Str: strconv.FormatFloat(f64, 'g', -1, 64)}
-				}
-
-				b = strconv.AppendFloat(b, f64, 'g', -1, 64)
-			case opTime:
-				var err error
-
-				b, err = appendTime(b, (*time.Time)(fieldPtr))
-				if err != nil {
-					return b, err
-				}
-			default:
-				var err error
-
+			if field.op == opEnc {
 				b, err = field.enc(enc, b, fieldPtr)
-				if err != nil {
-					return b, err
-				}
+			} else {
+				b, err = appendScalar(b, field.op, fieldPtr)
+			}
+
+			if err != nil {
+				return b, err
 			}
 		}
 
