@@ -3,7 +3,6 @@ package jsn
 import (
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"io"
 	"math"
 	"reflect"
@@ -15,7 +14,12 @@ import (
 	"unsafe"
 )
 
-const hexTable = "0123456789abcdef"
+const (
+	hexTable = "0123456789abcdef"
+
+	lsbMask = 0x0101010101010101
+	msbMask = 0x8080808080808080
+)
 
 // WriterMarshaler is implemented by types that can marshal themselves
 // directly into an io.Writer, avoiding intermediate []byte allocations.
@@ -82,10 +86,6 @@ type sliceHeader struct {
 	Cap  int
 }
 
-// ErrTypeMismatch is returned by EncodeAs when the value's dynamic type
-// does not match the type the TypeEncoder was compiled for.
-var ErrTypeMismatch = errors.New("jsn: EncodeAs type mismatch")
-
 var (
 	safeSet [256]bool
 	cache   sync.Map // map[unsafe.Pointer]*cachedEncoder
@@ -111,25 +111,26 @@ func init() {
 }
 
 //go:nosplit
-func noescape(p unsafe.Pointer) unsafe.Pointer {
-	x := uintptr(p)
+func noescape(ptr unsafe.Pointer) unsafe.Pointer {
+	uiPtr := uintptr(ptr)
 
-	return unsafe.Pointer(x ^ 0)
+	return unsafe.Pointer(uiPtr ^ 0)
 }
 
-// Compile builds and caches an encoder for T, returning a TypeEncoder
-// for use with Encoder.EncodeAs. Compile is typically called once at
-// package init.
-func Compile[T any]() *TypeEncoder {
-	tp := reflect.TypeFor[T]()
-	ce := getEncoder(tp)
+// TypedEncoder is a pre-compiled encoder bound to T at the type level.
+// Encode takes *T directly, so no interface boxing, dynamic type check,
+// or per-call heap escape can occur. It is safe for concurrent use by
+// multiple Encoders.
+type TypedEncoder[T any] struct {
+	enc encoderFunc
+}
 
-	return &TypeEncoder{
-		typ:    tp,
-		typPtr: extractTypePtr(tp),
-		enc:    ce.enc,
-		isPtr:  ce.isPtr,
-	}
+// CompileTyped builds and caches an encoder for T. Prefer it over
+// Compile/EncodeAs on hot paths; keep EncodeAs for call sites that are
+// genuinely dynamic. For zero allocations, pass heap-resident values
+// (v escapes into the compiled encoder).
+func CompileTyped[T any]() *TypedEncoder[T] {
+	return &TypedEncoder[T]{enc: getEncoder(reflect.TypeFor[T]()).enc}
 }
 
 // NewEncoder returns a new Encoder that writes JSON values to wr,
@@ -141,15 +142,17 @@ func NewEncoder(wr io.Writer) *Encoder {
 	}
 }
 
-// Encode writes the JSON encoding of val followed by a newline to the
-// underlying writer. The dynamic type of val is looked up in the encoder
-// cache; for hot paths prefer EncodeAs with a compiled TypeEncoder.
-func (e *Encoder) Encode(val any) error {
-	b := e.buf[:0]
+// Encode writes the JSON encoding of *v followed by a newline.
+func (te *TypedEncoder[T]) Encode(e *Encoder, v *T) error {
+	if v == nil {
+		b := append(e.buf[:0], "null\n"...)
+		e.buf = b
 
-	var err error
+		_, err := e.wr.Write(b)
+		return err
+	}
 
-	b, err = e.encodeAny(b, val)
+	b, err := te.enc(e, e.buf[:0], unsafe.Pointer(v))
 	if err != nil {
 		e.buf = b
 
@@ -163,36 +166,15 @@ func (e *Encoder) Encode(val any) error {
 	return err
 }
 
-// EncodeAs writes the JSON encoding of val followed by a newline, using the
-// pre-compiled TypeEncoder tp. It returns ErrTypeMismatch if val's dynamic
-// type is not the type tp was compiled for. A nil val encodes as null.
-func (e *Encoder) EncodeAs(tp *TypeEncoder, val any) error {
-	ef := *(*eface)(noescape(unsafe.Pointer(&val)))
-	if ef.typ == nil {
-		b := append(e.buf[:0], "null\n"...)
-		e.buf = b
-
-		_, err := e.wr.Write(b)
-		return err
-	}
-
-	if ef.typ != tp.typPtr {
-		return ErrTypeMismatch
-	}
-
+// Encode writes the JSON encoding of val followed by a newline to the
+// underlying writer. The dynamic type of val is looked up in the encoder
+// cache; for hot paths prefer EncodeAs with a compiled TypeEncoder.
+func (e *Encoder) Encode(val any) error {
 	b := e.buf[:0]
 
-	var p unsafe.Pointer
+	var err error
 
-	if tp.isPtr {
-		e.scratch = ef.word
-
-		p = unsafe.Pointer(&e.scratch)
-	} else {
-		p = ef.word
-	}
-
-	b, err := tp.enc(e, b, p)
+	b, err = e.encodeAny(b, val)
 	if err != nil {
 		e.buf = b
 

@@ -57,11 +57,11 @@ var (
 	deepData     *Node
 	mapData      map[string]int64
 
-	smallEnc    = jsn.Compile[*Small]()
-	allTypesEnc = jsn.Compile[*AllTypes]()
-	medEnc      = jsn.Compile[*Medium]()
-	largeEnc    = jsn.Compile[*Large]()
-	deepEnc     = jsn.Compile[*Node]()
+	smallEnc    = jsn.CompileTyped[Small]()
+	allTypesEnc = jsn.CompileTyped[AllTypes]()
+	medEnc      = jsn.CompileTyped[Medium]()
+	largeEnc    = jsn.CompileTyped[Large]()
+	deepEnc     = jsn.CompileTyped[Node]()
 )
 
 func init() {
@@ -149,7 +149,7 @@ func BenchmarkEncode_AllTypes_Jsn(b *testing.B) {
 	b.ResetTimer()
 
 	for b.Loop() {
-		_ = enc.EncodeAs(allTypesEnc, allTypesData)
+		_ = allTypesEnc.Encode(enc, allTypesData)
 	}
 }
 
@@ -171,7 +171,7 @@ func BenchmarkEncode_Small_Jsn(b *testing.B) {
 	b.ResetTimer()
 
 	for b.Loop() {
-		_ = enc.EncodeAs(smallEnc, smallData)
+		_ = smallEnc.Encode(enc, smallData)
 	}
 }
 
@@ -193,7 +193,7 @@ func BenchmarkEncode_Medium_Jsn(b *testing.B) {
 	b.ResetTimer()
 
 	for b.Loop() {
-		_ = enc.EncodeAs(medEnc, medData)
+		_ = medEnc.Encode(enc, medData)
 	}
 }
 
@@ -215,7 +215,7 @@ func BenchmarkEncode_Large_Jsn(b *testing.B) {
 	b.ResetTimer()
 
 	for b.Loop() {
-		_ = enc.EncodeAs(largeEnc, largeData)
+		_ = largeEnc.Encode(enc, largeData)
 	}
 }
 
@@ -237,7 +237,7 @@ func BenchmarkEncode_Deep_Jsn(b *testing.B) {
 	b.ResetTimer()
 
 	for b.Loop() {
-		_ = enc.EncodeAs(deepEnc, deepData)
+		_ = deepEnc.Encode(enc, deepData)
 	}
 }
 
