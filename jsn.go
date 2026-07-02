@@ -26,7 +26,6 @@ const (
 	opUint64
 	opFloat64
 	opTime
-	opStringPtr
 )
 
 // WriterMarshaler is implemented by types that can marshal themselves
@@ -67,12 +66,29 @@ type encoderFunc func(e *Encoder, b []byte, p unsafe.Pointer) ([]byte, error)
 
 type isEmptyFunc func(p unsafe.Pointer) bool
 
+type isZeroer interface {
+	IsZero() bool
+}
+
+type tapeInstr struct {
+	lit      []byte
+	enc      encoderFunc
+	offset   uintptr
+	op       uint8
+	indirect bool
+}
+
+type tapeEncoder struct {
+	instrs []tapeInstr
+	tail   []byte
+}
+
 type structField struct {
 	nameBytes []byte
 	enc       encoderFunc
 	offset    uintptr
 	isEmpty   isEmptyFunc
-	omitEmpty bool
+	omit      bool
 	indirect  bool
 	op        uint8
 }
@@ -98,6 +114,7 @@ var (
 	cache   sync.Map // map[unsafe.Pointer]*cachedEncoder
 
 	timeType            = reflect.TypeFor[time.Time]()
+	isZeroerType        = reflect.TypeFor[isZeroer]()
 	byteSliceType       = reflect.TypeFor[[]byte]()
 	writerMarshalerType = reflect.TypeFor[WriterMarshaler]()
 	byteMarshalerType   = reflect.TypeFor[ByteMarshaler]()
@@ -239,6 +256,65 @@ func (e *Encoder) encodeAny(b []byte, val any) ([]byte, error) {
 	}
 
 	return ce.enc(e, b, ptr)
+}
+
+func (te *tapeEncoder) encode(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
+	for i := range te.instrs {
+		ins := &te.instrs[i]
+
+		b = append(b, ins.lit...)
+
+		fieldPtr := unsafe.Add(ptr, ins.offset)
+
+		if ins.indirect {
+			fieldPtr = *(*unsafe.Pointer)(fieldPtr)
+			if fieldPtr == nil {
+				b = append(b, "null"...)
+
+				continue
+			}
+		}
+
+		switch ins.op {
+		case opString:
+			b = writeString(b, *(*string)(fieldPtr))
+		case opBool:
+			if *(*bool)(fieldPtr) {
+				b = append(b, "true"...)
+			} else {
+				b = append(b, "false"...)
+			}
+		case opInt:
+			b = strconv.AppendInt(b, int64(*(*int)(fieldPtr)), 10)
+		case opInt64:
+			b = strconv.AppendInt(b, *(*int64)(fieldPtr), 10)
+		case opUint:
+			b = strconv.AppendUint(b, uint64(*(*uint)(fieldPtr)), 10)
+		case opUint64:
+			b = strconv.AppendUint(b, *(*uint64)(fieldPtr), 10)
+		case opFloat64:
+			f64 := *(*float64)(fieldPtr)
+
+			if math.IsNaN(f64) || math.IsInf(f64, 0) {
+				return b, &json.UnsupportedValueError{Value: reflect.ValueOf(f64), Str: strconv.FormatFloat(f64, 'g', -1, 64)}
+			}
+
+			b = strconv.AppendFloat(b, f64, 'g', -1, 64)
+		case opTime:
+			b = append(b, '"')
+			b = (*time.Time)(fieldPtr).AppendFormat(b, time.RFC3339Nano)
+			b = append(b, '"')
+		default:
+			var err error
+
+			b, err = ins.enc(enc, b, fieldPtr)
+			if err != nil {
+				return b, err
+			}
+		}
+	}
+
+	return append(b, te.tail...), nil
 }
 
 func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encoderFunc {
@@ -677,7 +753,11 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 			return append(b, '}'), nil
 		}
 	case reflect.Struct:
-		enc = buildStructEncoder(tp, visiting)
+		if isFlattenable(tp) {
+			enc = buildTapeEncoder(tp, visiting)
+		} else {
+			enc = buildStructEncoder(tp, visiting)
+		}
 	case reflect.Pointer:
 		if pElem, ok := visiting[tp.Elem()]; ok && *pElem == nil {
 			enc = func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
@@ -741,11 +821,29 @@ func buildStructEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc)
 			nameBytes: []byte(`,"` + name + `":`),
 			enc:       buildEncoder(sf.Type, visiting),
 			offset:    sf.Offset,
-			omitEmpty: strings.Contains(opts, "omitempty"),
-			isEmpty:   buildIsEmptyFunc(sf.Type),
 		}
 
 		field.op, field.indirect = fieldOp(sf.Type)
+
+		omitEmpty := strings.Contains(opts, "omitempty")
+		omitZero := strings.Contains(opts, "omitzero")
+
+		switch {
+		case omitEmpty && omitZero:
+			isEmpty := buildIsEmptyFunc(sf.Type)
+			isZero := buildIsZeroFunc(sf.Type)
+
+			field.omit = true
+			field.isEmpty = func(p unsafe.Pointer) bool {
+				return isEmpty(p) || isZero(p)
+			}
+		case omitEmpty:
+			field.omit = true
+			field.isEmpty = buildIsEmptyFunc(sf.Type)
+		case omitZero:
+			field.omit = true
+			field.isEmpty = buildIsZeroFunc(sf.Type)
+		}
 
 		fields = append(fields, field)
 	}
@@ -758,7 +856,7 @@ func buildStructEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc)
 
 			fieldPtr := unsafe.Add(ptr, field.offset)
 
-			if field.omitEmpty && field.isEmpty(fieldPtr) {
+			if field.omit && field.isEmpty(fieldPtr) {
 				continue
 			}
 
@@ -802,12 +900,6 @@ func buildStructEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc)
 				b = append(b, '"')
 				b = (*time.Time)(fieldPtr).AppendFormat(b, time.RFC3339Nano)
 				b = append(b, '"')
-			case opStringPtr:
-				if strPtr := *(**string)(fieldPtr); strPtr != nil {
-					b = writeString(b, *strPtr)
-				} else {
-					b = append(b, "null"...)
-				}
 			default:
 				var err error
 
@@ -826,6 +918,105 @@ func buildStructEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc)
 
 		return append(b, '}'), nil
 	}
+}
+
+func isFlattenable(tp reflect.Type) bool {
+	if tp.Kind() != reflect.Struct || tp == timeType {
+		return false
+	}
+
+	if tp.Implements(writerMarshalerType) || tp.Implements(byteMarshalerType) {
+		return false
+	}
+
+	for sf := range tp.Fields() {
+		if !sf.IsExported() {
+			continue
+		}
+
+		tag := sf.Tag.Get("json")
+		if tag == "-" {
+			continue
+		}
+
+		_, opts, _ := strings.Cut(tag, ",")
+		if strings.Contains(opts, "omitempty") || strings.Contains(opts, "omitzero") {
+			return false
+		}
+	}
+
+	return true
+}
+
+func buildTapeEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encoderFunc {
+	te := &tapeEncoder{}
+
+	var pending []byte
+
+	var walk func(st reflect.Type, base uintptr)
+
+	walk = func(st reflect.Type, base uintptr) {
+		pending = append(pending, '{')
+
+		first := true
+
+		for sf := range st.Fields() {
+			if !sf.IsExported() {
+				continue
+			}
+
+			tag := sf.Tag.Get("json")
+			if tag == "-" {
+				continue
+			}
+
+			name, _, _ := strings.Cut(tag, ",")
+			if name == "" {
+				name = sf.Name
+			}
+
+			if !first {
+				pending = append(pending, ',')
+			}
+
+			first = false
+
+			pending = append(pending, '"')
+			pending = append(pending, name...)
+			pending = append(pending, '"', ':')
+
+			op, indirect := fieldOp(sf.Type)
+
+			if op == opEnc && !indirect && isFlattenable(sf.Type) {
+				walk(sf.Type, base+sf.Offset)
+
+				continue
+			}
+
+			ins := tapeInstr{
+				lit:      pending,
+				offset:   base + sf.Offset,
+				op:       op,
+				indirect: indirect,
+			}
+
+			if op == opEnc {
+				ins.enc = buildEncoder(sf.Type, visiting)
+			}
+
+			te.instrs = append(te.instrs, ins)
+
+			pending = nil
+		}
+
+		pending = append(pending, '}')
+	}
+
+	walk(tp, 0)
+
+	te.tail = pending
+
+	return te.encode
 }
 
 func buildIsEmptyFunc(t reflect.Type) isEmptyFunc {
@@ -917,6 +1108,67 @@ func buildIsEmptyFunc(t reflect.Type) isEmptyFunc {
 	return func(p unsafe.Pointer) bool {
 		return false
 	}
+}
+
+func buildIsZeroFunc(t reflect.Type) isEmptyFunc {
+	if t == timeType {
+		return func(p unsafe.Pointer) bool {
+			return (*time.Time)(p).IsZero()
+		}
+	}
+
+	if t.Implements(isZeroerType) {
+		typPtr := extractTypePtr(t)
+		isPtr := isPointerShaped(t.Kind())
+
+		return func(p unsafe.Pointer) bool {
+			var val any
+
+			ef := (*eface)(noescape(unsafe.Pointer(&val)))
+
+			ef.typ = typPtr
+
+			if isPtr {
+				ef.word = *(*unsafe.Pointer)(p)
+				if ef.word == nil {
+					return true
+				}
+			} else {
+				ef.word = p
+			}
+
+			return val.(interface{ IsZero() bool }).IsZero()
+		}
+	}
+
+	if ptrType := reflect.PointerTo(t); ptrType.Implements(isZeroerType) {
+		typPtr := extractTypePtr(ptrType)
+
+		return func(p unsafe.Pointer) bool {
+			var val any
+
+			ef := (*eface)(noescape(unsafe.Pointer(&val)))
+
+			ef.typ = typPtr
+			ef.word = p
+
+			return val.(interface{ IsZero() bool }).IsZero()
+		}
+	}
+
+	switch t.Kind() {
+	case reflect.Slice, reflect.Map, reflect.Pointer, reflect.Interface, reflect.Chan, reflect.Func, reflect.UnsafePointer:
+		return func(p unsafe.Pointer) bool {
+			return *(*unsafe.Pointer)(p) == nil
+		}
+	case reflect.Struct, reflect.Array, reflect.Complex64, reflect.Complex128:
+		return func(p unsafe.Pointer) bool {
+			return reflect.NewAt(t, p).Elem().IsZero()
+		}
+	}
+
+	// remaining scalar kinds: zero and empty coincide
+	return buildIsEmptyFunc(t)
 }
 
 func extractTypePtr(typ reflect.Type) unsafe.Pointer {
