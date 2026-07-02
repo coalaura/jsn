@@ -109,6 +109,8 @@ byteloop:
 	TESTQ CX, CX
 	JLE  done
 	MOVBQZX (SI), DX
+	CMPB DX, $0xE2
+	JE   check_e2
 	CMPB DX, $0x22
 	JE   foundb
 	CMPB DX, $0x5C
@@ -119,10 +121,20 @@ byteloop:
 	JE   foundb
 	CMPB DX, $0x26
 	JE   foundb
-	CMPB DX, $0xE2
-	JE   foundb
 	CMPB DX, $0x1F
 	JBE  foundb
+	INCQ SI
+	DECQ CX
+	INCQ AX
+	JMP  byteloop
+
+	// 0xE2 only flags an escape when followed by 0x80
+check_e2:
+	CMPQ CX, $2
+	JL   skip_e2
+	CMPB 1(SI), $0x80
+	JE   foundb
+skip_e2:
 	INCQ SI
 	DECQ CX
 	INCQ AX
