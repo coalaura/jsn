@@ -772,6 +772,128 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 				*pEnc = enc
 
 				return enc
+			case reflect.Int:
+				enc = func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
+					m := *(*map[string]int)(ptr)
+					if m == nil {
+						return append(b, "null"...), nil
+					}
+
+					mark := len(b)
+
+					for k, val := range m {
+						b = append(b, ',')
+						b = writeString(b, k)
+						b = append(b, ':')
+						b = appendInt64Fast(b, int64(val))
+					}
+
+					if len(b) == mark {
+						return append(b, '{', '}'), nil
+					}
+
+					b[mark] = '{'
+
+					return append(b, '}'), nil
+				}
+
+				*pEnc = enc
+
+				return enc
+			case reflect.Uint64:
+				enc = func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
+					m := *(*map[string]uint64)(ptr)
+					if m == nil {
+						return append(b, "null"...), nil
+					}
+
+					mark := len(b)
+
+					for k, val := range m {
+						b = append(b, ',')
+						b = writeString(b, k)
+						b = append(b, ':')
+						b = appendUint64Fast(b, val)
+					}
+
+					if len(b) == mark {
+						return append(b, '{', '}'), nil
+					}
+
+					b[mark] = '{'
+
+					return append(b, '}'), nil
+				}
+
+				*pEnc = enc
+
+				return enc
+			case reflect.Float64:
+				enc = func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
+					m := *(*map[string]float64)(ptr)
+					if m == nil {
+						return append(b, "null"...), nil
+					}
+
+					mark := len(b)
+
+					for k, val := range m {
+						b = append(b, ',')
+						b = writeString(b, k)
+						b = append(b, ':')
+
+						if math.IsNaN(val) || math.IsInf(val, 0) {
+							return b, &json.UnsupportedValueError{Value: reflect.ValueOf(val), Str: strconv.FormatFloat(val, 'g', -1, 64)}
+						}
+
+						b = strconv.AppendFloat(b, val, 'g', -1, 64)
+					}
+
+					if len(b) == mark {
+						return append(b, '{', '}'), nil
+					}
+
+					b[mark] = '{'
+
+					return append(b, '}'), nil
+				}
+
+				*pEnc = enc
+
+				return enc
+			case reflect.Bool:
+				enc = func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
+					m := *(*map[string]bool)(ptr)
+					if m == nil {
+						return append(b, "null"...), nil
+					}
+
+					mark := len(b)
+
+					for k, val := range m {
+						b = append(b, ',')
+						b = writeString(b, k)
+						b = append(b, ':')
+
+						if val {
+							b = append(b, "true"...)
+						} else {
+							b = append(b, "false"...)
+						}
+					}
+
+					if len(b) == mark {
+						return append(b, '{', '}'), nil
+					}
+
+					b[mark] = '{'
+
+					return append(b, '}'), nil
+				}
+
+				*pEnc = enc
+
+				return enc
 			case reflect.Interface:
 				enc = func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
 					m := *(*map[string]any)(ptr)
@@ -1342,7 +1464,6 @@ func writeString(b []byte, str string) []byte {
 		}
 	}
 
-	// First 48 bytes are clean and there's more to scan - SIMD the rest.
 	if safeEnd == 48 && length > 48 {
 		safeEnd += simdFirstEscape(str[48:])
 	}
@@ -1354,6 +1475,53 @@ func writeString(b []byte, str string) []byte {
 	}
 
 	b = append(b, str[:safeEnd]...)
+
+	if length > 128 {
+		pos := safeEnd
+
+		for pos < length {
+			next := simdFirstEscape(str[pos:])
+
+			if next == len(str[pos:]) {
+				b = append(b, str[pos:]...)
+				break
+			}
+
+			i := pos + next
+			ch := str[i]
+
+			b = append(b, str[pos:i]...)
+
+			if ch == 0xE2 {
+				if i+2 < length && str[i+1] == 0x80 && (str[i+2] == 0xA8 || str[i+2] == 0xA9) {
+					b = append(b, '\\', 'u', '2', '0', '2', hexTable[str[i+2]&0xf])
+					pos = i + 3
+					continue
+				}
+
+				b = append(b, str[i])
+				pos = i + 1
+				continue
+			}
+
+			switch ch {
+			case '\\', '"':
+				b = append(b, '\\', ch)
+			case '\n':
+				b = append(b, '\\', 'n')
+			case '\r':
+				b = append(b, '\\', 'r')
+			case '\t':
+				b = append(b, '\\', 't')
+			default:
+				b = append(b, '\\', 'u', '0', '0', hexTable[ch>>4], hexTable[ch&0xf])
+			}
+
+			pos = i + 1
+		}
+
+		return append(b, '"')
+	}
 
 	start := safeEnd
 
