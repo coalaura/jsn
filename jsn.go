@@ -704,7 +704,7 @@ func buildStructEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc)
 		}
 
 		field := structField{
-			nameBytes: []byte(`"` + name + `":`),
+			nameBytes: []byte(`,"` + name + `":`),
 			enc:       buildEncoder(sf.Type, visiting),
 			offset:    sf.Offset,
 			omitEmpty: strings.Contains(opts, "omitempty"),
