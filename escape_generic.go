@@ -22,3 +22,25 @@ func simdFirstEscape(s string) int {
 
 	return len(s)
 }
+
+func simdCopySafe(dst []byte, src string) int {
+	for i := 0; i < len(src); i++ {
+		b := src[i]
+
+		if b == 0xE2 {
+			if i+1 < len(src) && src[i+1] == 0x80 {
+				return i
+			}
+
+			continue
+		}
+
+		if safeSet[b] == 0 {
+			return i
+		}
+
+		dst[i] = b
+	}
+
+	return len(src)
+}

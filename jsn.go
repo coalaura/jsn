@@ -367,6 +367,19 @@ func (e *Encoder) maybeFlush(b []byte) ([]byte, error) {
 	return b, nil
 }
 
+func growBytes(b []byte, needCap int) []byte {
+	newCap := needCap
+
+	if double := 2 * cap(b); double > newCap {
+		newCap = double
+	}
+
+	newB := make([]byte, len(b), newCap)
+	copy(newB, b)
+
+	return newB
+}
+
 func getEncoder(tp reflect.Type) *cachedEncoder {
 	key := uintptr(extractTypePtr(tp))
 
@@ -484,12 +497,14 @@ func (te *tapeEncoder) encode(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byt
 
 			b = strconv.AppendFloat(b, f64, 'g', -1, 64)
 		case opTime:
-			var err error
+			var tbuf [35]byte
 
-			b, err = appendTime(b, (*time.Time)(fieldPtr))
+			n, err := formatTime(&tbuf, (*time.Time)(fieldPtr))
 			if err != nil {
 				return b, err
 			}
+
+			b = append(b, tbuf[:n]...)
 		default:
 			var err error
 
@@ -558,7 +573,14 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 	// bypass time.Time allocations
 	if tp == timeType {
 		enc := func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
-			return appendTime(b, (*time.Time)(ptr))
+			var tbuf [35]byte
+
+			n, err := formatTime(&tbuf, (*time.Time)(ptr))
+			if err != nil {
+				return b, err
+			}
+
+			return append(b, tbuf[:n]...), nil
 		}
 
 		*pEnc = enc
@@ -1804,6 +1826,61 @@ func implementsAnyMarshaler(t reflect.Type) bool {
 	return t.Implements(writerMarshalerType) || t.Implements(byteMarshalerType) || pt.Implements(writerMarshalerType) || pt.Implements(byteMarshalerType)
 }
 
+//go:noinline
+func writeStringLong(b []byte, str string, safeEnd int) []byte {
+	length := len(str)
+	pos := safeEnd
+
+	for pos < length {
+		remaining := length - pos
+
+		if cap(b) < len(b)+remaining {
+			b = growBytes(b, len(b)+remaining)
+		}
+
+		n := simdCopySafe(b[len(b):cap(b)], str[pos:])
+		b = b[:len(b)+n]
+
+		if n == remaining {
+			break
+		}
+
+		i := pos + n
+		ch := str[i]
+
+		if ch == 0xE2 {
+			if i+2 < length && str[i+1] == 0x80 && (str[i+2] == 0xA8 || str[i+2] == 0xA9) {
+				b = append(b, '\\', 'u', '2', '0', '2', hexTable[str[i+2]&0xf])
+				pos = i + 3
+
+				continue
+			}
+
+			b = append(b, str[i])
+			pos = i + 1
+
+			continue
+		}
+
+		switch ch {
+		case '\\', '"':
+			b = append(b, '\\', ch)
+		case '\n':
+			b = append(b, '\\', 'n')
+		case '\r':
+			b = append(b, '\\', 'r')
+		case '\t':
+			b = append(b, '\\', 't')
+		default:
+			b = append(b, '\\', 'u', '0', '0', hexTable[ch>>4], hexTable[ch&0xf])
+		}
+
+		pos = i + 1
+	}
+
+	return append(b, '"')
+}
+
 func writeString(b []byte, str string) []byte {
 	length := len(str)
 	if length == 0 {
@@ -1816,6 +1893,7 @@ func writeString(b []byte, str string) []byte {
 
 	inlineLimit := min(length, 48)
 
+	// SWAR causes performance regressions here
 	for safeEnd+8 <= inlineLimit {
 		if safeSet[str[safeEnd]]&safeSet[str[safeEnd+1]]&safeSet[str[safeEnd+2]]&safeSet[str[safeEnd+3]]&safeSet[str[safeEnd+4]]&safeSet[str[safeEnd+5]]&safeSet[str[safeEnd+6]]&safeSet[str[safeEnd+7]] == 0 {
 			break
@@ -1847,51 +1925,7 @@ func writeString(b []byte, str string) []byte {
 	b = append(b, str[:safeEnd]...)
 
 	if length > 128 {
-		pos := safeEnd
-
-		for pos < length {
-			next := simdFirstEscape(str[pos:])
-
-			if next == length-pos {
-				b = append(b, str[pos:]...)
-
-				break
-			}
-
-			i := pos + next
-			ch := str[i]
-
-			b = append(b, str[pos:i]...)
-
-			if ch == 0xE2 {
-				if i+2 < length && str[i+1] == 0x80 && (str[i+2] == 0xA8 || str[i+2] == 0xA9) {
-					b = append(b, '\\', 'u', '2', '0', '2', hexTable[str[i+2]&0xf])
-					pos = i + 3
-					continue
-				}
-
-				b = append(b, str[i])
-				pos = i + 1
-				continue
-			}
-
-			switch ch {
-			case '\\', '"':
-				b = append(b, '\\', ch)
-			case '\n':
-				b = append(b, '\\', 'n')
-			case '\r':
-				b = append(b, '\\', 'r')
-			case '\t':
-				b = append(b, '\\', 't')
-			default:
-				b = append(b, '\\', 'u', '0', '0', hexTable[ch>>4], hexTable[ch&0xf])
-			}
-
-			pos = i + 1
-		}
-
-		return append(b, '"')
+		return writeStringLong(b, str, safeEnd)
 	}
 
 	start := safeEnd
@@ -1942,14 +1976,14 @@ func writeString(b []byte, str string) []byte {
 	return append(b, '"')
 }
 
-func fieldOp(t reflect.Type) (uint8, bool) {
-	op := scalarOp(t)
+func fieldOp(tp reflect.Type) (uint8, bool) {
+	op := scalarOp(tp)
 	if op != opEnc {
 		return op, false
 	}
 
-	if t.Kind() == reflect.Pointer && !t.Implements(writerMarshalerType) && !t.Implements(byteMarshalerType) {
-		op = scalarOp(t.Elem())
+	if tp.Kind() == reflect.Pointer && !tp.Implements(writerMarshalerType) && !tp.Implements(byteMarshalerType) {
+		op = scalarOp(tp.Elem())
 		if op != opEnc {
 			return op, true
 		}
@@ -1958,38 +1992,38 @@ func fieldOp(t reflect.Type) (uint8, bool) {
 	return opEnc, false
 }
 
-func appendScalar(b []byte, op uint8, p unsafe.Pointer) ([]byte, error) {
+func appendScalar(b []byte, op uint8, ptr unsafe.Pointer) ([]byte, error) {
 	switch op {
 	case opString:
-		return writeString(b, *(*string)(p)), nil
+		return writeString(b, *(*string)(ptr)), nil
 	case opBool:
-		if *(*bool)(p) {
+		if *(*bool)(ptr) {
 			return append(b, "true"...), nil
 		}
 
 		return append(b, "false"...), nil
 	case opInt:
-		return appendInt64Fast(b, int64(*(*int)(p))), nil
+		return appendInt64Fast(b, int64(*(*int)(ptr))), nil
 	case opInt8:
-		return appendInt64Fast(b, int64(*(*int8)(p))), nil
+		return appendInt64Fast(b, int64(*(*int8)(ptr))), nil
 	case opInt16:
-		return appendInt64Fast(b, int64(*(*int16)(p))), nil
+		return appendInt64Fast(b, int64(*(*int16)(ptr))), nil
 	case opInt32:
-		return appendInt64Fast(b, int64(*(*int32)(p))), nil
+		return appendInt64Fast(b, int64(*(*int32)(ptr))), nil
 	case opInt64:
-		return appendInt64Fast(b, *(*int64)(p)), nil
+		return appendInt64Fast(b, *(*int64)(ptr)), nil
 	case opUint:
-		return appendUint64Fast(b, uint64(*(*uint)(p))), nil
+		return appendUint64Fast(b, uint64(*(*uint)(ptr))), nil
 	case opUint8:
-		return appendUint64Fast(b, uint64(*(*uint8)(p))), nil
+		return appendUint64Fast(b, uint64(*(*uint8)(ptr))), nil
 	case opUint16:
-		return appendUint64Fast(b, uint64(*(*uint16)(p))), nil
+		return appendUint64Fast(b, uint64(*(*uint16)(ptr))), nil
 	case opUint32:
-		return appendUint64Fast(b, uint64(*(*uint32)(p))), nil
+		return appendUint64Fast(b, uint64(*(*uint32)(ptr))), nil
 	case opUint64:
-		return appendUint64Fast(b, *(*uint64)(p)), nil
+		return appendUint64Fast(b, *(*uint64)(ptr)), nil
 	case opFloat32:
-		f := float64(*(*float32)(p))
+		f := float64(*(*float32)(ptr))
 
 		if math.IsNaN(f) || math.IsInf(f, 0) {
 			return b, &json.UnsupportedValueError{Value: reflect.ValueOf(f), Str: strconv.FormatFloat(f, 'g', -1, 32)}
@@ -1997,7 +2031,7 @@ func appendScalar(b []byte, op uint8, p unsafe.Pointer) ([]byte, error) {
 
 		return strconv.AppendFloat(b, f, 'g', -1, 32), nil
 	case opFloat64:
-		f := *(*float64)(p)
+		f := *(*float64)(ptr)
 
 		if math.IsNaN(f) || math.IsInf(f, 0) {
 			return b, &json.UnsupportedValueError{Value: reflect.ValueOf(f), Str: strconv.FormatFloat(f, 'g', -1, 64)}
@@ -2005,33 +2039,40 @@ func appendScalar(b []byte, op uint8, p unsafe.Pointer) ([]byte, error) {
 
 		return strconv.AppendFloat(b, f, 'g', -1, 64), nil
 	case opTime:
-		return appendTime(b, (*time.Time)(p))
+
+		var tbuf [35]byte
+
+		n, err := formatTime(&tbuf, (*time.Time)(ptr))
+		if err != nil {
+			return b, err
+		}
+
+		b = append(b, tbuf[:n]...)
 	}
 
 	return b, nil
 }
 
-func appendTime(b []byte, t *time.Time) ([]byte, error) {
+func formatTime(buf *[35]byte, t *time.Time) (int, error) {
 	if y := t.Year(); y < 0 || y >= 10000 {
-		return b, ErrTimeOutOfRange
+		return 0, ErrTimeOutOfRange
 	}
-
+	buf[0] = '"'
+	b := t.AppendFormat(buf[:1:35], time.RFC3339Nano)
 	b = append(b, '"')
-	b = t.AppendFormat(b, time.RFC3339Nano)
-
-	return append(b, '"'), nil
+	return len(b), nil
 }
 
-func scalarOp(t reflect.Type) uint8 {
-	if t == timeType {
+func scalarOp(tp reflect.Type) uint8 {
+	if tp == timeType {
 		return opTime
 	}
 
-	if t == byteSliceType || t == rawMessageType || implementsAnyMarshaler(t) {
+	if tp == byteSliceType || tp == rawMessageType || implementsAnyMarshaler(tp) {
 		return opEnc
 	}
 
-	switch t.Kind() {
+	switch tp.Kind() {
 	case reflect.String:
 		return opString
 	case reflect.Bool:
