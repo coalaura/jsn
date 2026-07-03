@@ -478,6 +478,10 @@ func (w WriterMarshalerImpl) MarshalJSONTo(wr io.Writer) error {
 	return err
 }
 
+func (w WriterMarshalerImpl) MarshalJSON() ([]byte, error) {
+	return []byte(`{"w":"` + w.V + `"}`), nil
+}
+
 type ErrMarshaler struct{}
 
 func (ErrMarshaler) MarshalJSON() ([]byte, error) {

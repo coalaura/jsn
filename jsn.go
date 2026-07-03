@@ -8,6 +8,7 @@ import (
 	"maps"
 	"math"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -412,15 +413,26 @@ func (e *Encoder) encodeAny(b []byte, val any) ([]byte, error) {
 
 	var ptr unsafe.Pointer
 
+	var rv reflect.Value
+
 	if ce.isPtr {
 		e.scratch = ef.word
 
 		ptr = unsafe.Pointer(&e.scratch)
+	} else if ef.word == nil {
+		// runtime may store a nil word for zero-value non-pointer types
+		rv = reflect.New(reflect.TypeOf(val))
+
+		ptr = unsafe.Pointer(rv.Pointer())
 	} else {
 		ptr = ef.word
 	}
 
-	return ce.enc(e, b, ptr)
+	b, err := ce.enc(e, b, ptr)
+
+	runtime.KeepAlive(rv)
+
+	return b, err
 }
 
 func (te *tapeEncoder) encode(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
@@ -487,7 +499,7 @@ func (te *tapeEncoder) encode(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byt
 				return b, &json.UnsupportedValueError{Value: reflect.ValueOf(float64(f32)), Str: strconv.FormatFloat(float64(f32), 'g', -1, 32)}
 			}
 
-			b = strconv.AppendFloat(b, float64(f32), 'g', -1, 32)
+			b = appendFloat32(b, f32)
 		case opFloat64:
 			f64 := *(*float64)(fieldPtr)
 
@@ -495,7 +507,7 @@ func (te *tapeEncoder) encode(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byt
 				return b, &json.UnsupportedValueError{Value: reflect.ValueOf(f64), Str: strconv.FormatFloat(f64, 'g', -1, 64)}
 			}
 
-			b = strconv.AppendFloat(b, f64, 'g', -1, 64)
+			b = appendFloat64(b, f64)
 		case opTime:
 			var tbuf [35]byte
 
@@ -709,13 +721,14 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 		}
 	case reflect.Float32:
 		enc = func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
-			f := float64(*(*float32)(ptr))
+			f32 := *(*float32)(ptr)
+			f := float64(f32)
 
 			if math.IsNaN(f) || math.IsInf(f, 0) {
 				return b, &json.UnsupportedValueError{Value: reflect.ValueOf(f), Str: strconv.FormatFloat(f, 'g', -1, 32)}
 			}
 
-			return strconv.AppendFloat(b, f, 'g', -1, 32), nil
+			return appendFloat32(b, f32), nil
 		}
 	case reflect.Float64:
 		enc = func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
@@ -725,7 +738,7 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 				return b, &json.UnsupportedValueError{Value: reflect.ValueOf(f), Str: strconv.FormatFloat(f, 'g', -1, 64)}
 			}
 
-			return strconv.AppendFloat(b, f, 'g', -1, 64), nil
+			return appendFloat64(b, f), nil
 		}
 	case reflect.Bool:
 		enc = func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
@@ -1160,7 +1173,7 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 							return b, &json.UnsupportedValueError{Value: reflect.ValueOf(val), Str: strconv.FormatFloat(val, 'g', -1, 64)}
 						}
 
-						b = strconv.AppendFloat(b, val, 'g', -1, 64)
+						b = appendFloat64(b, val)
 
 						b, err = enc.maybeFlush(b)
 						if err != nil {
@@ -1618,12 +1631,6 @@ func buildTapeEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) *
 }
 
 func buildIsEmptyFunc(t reflect.Type) isEmptyFunc {
-	if t == timeType {
-		return func(p unsafe.Pointer) bool {
-			return (*time.Time)(p).IsZero()
-		}
-	}
-
 	switch t.Kind() {
 	case reflect.String:
 		return func(p unsafe.Pointer) bool {
@@ -2023,13 +2030,14 @@ func appendScalar(b []byte, op uint8, ptr unsafe.Pointer) ([]byte, error) {
 	case opUint64:
 		return appendUint64Fast(b, *(*uint64)(ptr)), nil
 	case opFloat32:
-		f := float64(*(*float32)(ptr))
+		f32 := *(*float32)(ptr)
+		f := float64(f32)
 
 		if math.IsNaN(f) || math.IsInf(f, 0) {
 			return b, &json.UnsupportedValueError{Value: reflect.ValueOf(f), Str: strconv.FormatFloat(f, 'g', -1, 32)}
 		}
 
-		return strconv.AppendFloat(b, f, 'g', -1, 32), nil
+		return appendFloat32(b, f32), nil
 	case opFloat64:
 		f := *(*float64)(ptr)
 
@@ -2037,7 +2045,7 @@ func appendScalar(b []byte, op uint8, ptr unsafe.Pointer) ([]byte, error) {
 			return b, &json.UnsupportedValueError{Value: reflect.ValueOf(f), Str: strconv.FormatFloat(f, 'g', -1, 64)}
 		}
 
-		return strconv.AppendFloat(b, f, 'g', -1, 64), nil
+		return appendFloat64(b, f), nil
 	case opTime:
 
 		var tbuf [35]byte
@@ -2051,6 +2059,54 @@ func appendScalar(b []byte, op uint8, ptr unsafe.Pointer) ([]byte, error) {
 	}
 
 	return b, nil
+}
+
+func appendFloat64(b []byte, f float64) []byte {
+	fmt := byte('f')
+
+	abs := math.Abs(f)
+	if abs != 0 {
+		if abs < 1e-6 || abs >= 1e21 {
+			fmt = 'e'
+		}
+	}
+
+	b = strconv.AppendFloat(b, f, fmt, -1, 64)
+
+	if fmt == 'e' {
+		// clean up e-09 to e-9
+		n := len(b)
+		if n >= 4 && b[n-4] == 'e' && b[n-3] == '-' && b[n-2] == '0' {
+			b[n-2] = b[n-1]
+			b = b[:n-1]
+		}
+	}
+
+	return b
+}
+
+func appendFloat32(b []byte, f float32) []byte {
+	fmt := byte('f')
+
+	abs := math.Abs(float64(f))
+	if abs != 0 {
+		if float32(abs) < 1e-6 || float32(abs) >= 1e21 {
+			fmt = 'e'
+		}
+	}
+
+	b = strconv.AppendFloat(b, float64(f), fmt, -1, 32)
+
+	if fmt == 'e' {
+		// clean up e-09 to e-9
+		n := len(b)
+		if n >= 4 && b[n-4] == 'e' && b[n-3] == '-' && b[n-2] == '0' {
+			b[n-2] = b[n-1]
+			b = b[:n-1]
+		}
+	}
+
+	return b
 }
 
 func formatTime(buf *[35]byte, t *time.Time) (int, error) {
