@@ -138,9 +138,43 @@ type cacheMap struct {
 
 var ErrTimeOutOfRange = errors.New("jsn: time.Time year outside of range [0,9999]")
 
-var (
-	safeSet [256]byte
+// safeSet maps each byte to 1 if it needs no JSON escaping, 0 otherwise.
+var safeSet = [256]byte{
+	// 0x00-0x0F
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	// 0x10-0x1F
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	// 0x20-0x2F
+	1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	// 0x30-0x3F
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1,
+	// 0x40-0x4F
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	// 0x50-0x5F
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1,
+	// 0x60-0x6F
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	// 0x70-0x7F
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	// 0x80-0x8F
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	// 0x90-0x9F
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	// 0xA0-0xAF
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	// 0xB0-0xBF
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	// 0xC0-0xCF
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	// 0xD0-0xDF
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	// 0xE0-0xEF
+	1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	// 0xF0-0xFF
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+}
 
+var (
 	cache cacheMap
 
 	timeType            = reflect.TypeFor[time.Time]()
@@ -165,9 +199,16 @@ func init() {
 	safeSet[0xE2] = 0
 }
 
-// noescape hides a pointer from escape analysis via uintptr.
-// Used to build interface values on the stack without allocating.
-// The value must be consumed before the caller returns.
+// noescape hides a pointer from escape analysis by routing it through
+// uintptr. The split across two statements is deliberate: it takes the
+// conversion outside spec pattern (3) ("single expression" pointer
+// arithmetic), so escape analysis treats the return value as unrelated
+// to the input. Inlining into one expression would let a future
+// compiler recognize pattern (3) and re-link the pointer.
+//
+// The ^0 prevents constant-folding from collapsing the round-trip
+// back to the identity. After escape analysis runs, the optimizer
+// folds ^0 away, so noescape compiles to zero instructions.
 //
 //go:nosplit
 func noescape(ptr unsafe.Pointer) unsafe.Pointer {
