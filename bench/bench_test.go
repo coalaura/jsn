@@ -82,10 +82,6 @@ type PtrByteMarshaler struct {
 	Value string `json:"value"`
 }
 
-func (p *PtrByteMarshaler) MarshalJSON() ([]byte, error) {
-	return []byte(`{"custom":"` + p.Value + `"}`), nil
-}
-
 type Embedded struct {
 	ID   int    `json:"id"`
 	Name string `json:"name"`
@@ -311,8 +307,12 @@ func init() {
 	}
 
 	ptrMarshalerData = &PtrByteMarshaler{Value: "hello"}
-	embedData = &WithEmbed{Embedded: Embedded{ID: 1, Name: "test"}, Extra: "data"}
+	embedData = &WithEmbed{ID: 1, Name: "test", Extra: "data"}
 	rawData = &WithRaw{ID: 1, Raw: json.RawMessage(`{"nested":true,"val":42}`)}
+}
+
+func (p *PtrByteMarshaler) MarshalJSON() ([]byte, error) {
+	return []byte(`{"custom":"` + p.Value + `"}`), nil
 }
 
 func BenchmarkEncode_AllTypes_Std(b *testing.B) {

@@ -13,6 +13,90 @@ import (
 	"github.com/coalaura/jsn"
 )
 
+type pointerField struct {
+	Value *int `json:"p"`
+}
+
+type arrayElement struct {
+	Value int `json:"x"`
+}
+
+type OmitStruct struct {
+	Str   string         `json:"str,omitempty"`
+	Int   int            `json:"int,omitempty"`
+	Ptr   *int           `json:"ptr,omitempty"`
+	Slice []int          `json:"slice,omitempty"`
+	Map   map[string]int `json:"map,omitempty"`
+	Time  time.Time      `json:"time"`
+	Keep  string         `json:"keep"`
+}
+
+type OmitZeroStruct struct {
+	Str  string    `json:"str,omitzero"`
+	Int  int       `json:"int,omitzero"`
+	Time time.Time `json:"time,omitzero"`
+	Keep string    `json:"keep"`
+}
+
+type IsZeroerImpl struct {
+	Empty bool
+}
+
+type OmitZeroIsZeroer struct {
+	Val  IsZeroerImpl `json:"val,omitzero"`
+	Keep string       `json:"keep"`
+}
+
+type ValByteMarshaler struct {
+	V string
+}
+
+type WriterMarshalerImpl struct {
+	V string
+}
+
+type ErrMarshaler struct{}
+
+type errWriter struct{}
+
+type allOmitEmpty struct {
+	Text   string `json:"a,omitempty"`
+	Number int    `json:"b,omitempty"`
+}
+
+type skippedFields struct {
+	Public  string `json:"public"`
+	private string
+	Hidden  string `json:"-"`
+	Shown   string `json:"shown"`
+}
+
+func (z IsZeroerImpl) IsZero() bool {
+	return z.Empty
+}
+
+func (v ValByteMarshaler) MarshalJSON() ([]byte, error) {
+	return []byte(`{"val":"` + v.V + `"}`), nil
+}
+
+func (w WriterMarshalerImpl) MarshalJSONTo(wr io.Writer) error {
+	_, err := io.WriteString(wr, `{"w":"`+w.V+`"}`)
+
+	return err
+}
+
+func (w WriterMarshalerImpl) MarshalJSON() ([]byte, error) {
+	return []byte(`{"w":"` + w.V + `"}`), nil
+}
+
+func (ErrMarshaler) MarshalJSON() ([]byte, error) {
+	return nil, errors.New("marshal failed")
+}
+
+func (errWriter) Write(p []byte) (int, error) {
+	return 0, errors.New("write failed")
+}
+
 func roundtripStd(t *testing.T, v any) any {
 	t.Helper()
 
@@ -124,13 +208,15 @@ func TestScalars(t *testing.T) {
 	})
 
 	t.Run("FloatSpecial", func(t *testing.T) {
-		vals := []float64{0, -0.0, 1e-10, 1e20, 1.7976931348623157e308, -1.7976931348623157e308, 3.141592653589793}
+		vals := []float64{0, math.Copysign(0, -1), 1e-10, 1e20, 1.7976931348623157e308, -1.7976931348623157e308, 3.141592653589793}
 
 		for _, v := range vals {
 			assertEqual(t, "float64", roundtripJsn(t, v), roundtripStd(t, v))
 		}
 
-		for _, v := range []float32{0, 1.5, -1.5, 3.14159} {
+		float32Values := []float32{0, 1.5, -1.5, 3.14159}
+
+		for _, v := range float32Values {
 			assertEqual(t, "float32", roundtripJsn(t, v), roundtripStd(t, v))
 		}
 	})
@@ -142,7 +228,9 @@ func TestScalars(t *testing.T) {
 }
 
 func TestFloatErrors(t *testing.T) {
-	for _, v := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+	values := []float64{math.NaN(), math.Inf(1), math.Inf(-1)}
+
+	for _, v := range values {
 		var buf bytes.Buffer
 
 		enc := jsn.NewEncoder(&buf)
@@ -248,11 +336,7 @@ func TestPointers(t *testing.T) {
 	})
 
 	t.Run("NilPointerField", func(t *testing.T) {
-		type S struct {
-			P *int `json:"p"`
-		}
-
-		assertEqual(t, "nil ptr field", roundtripJsn(t, S{}), roundtripStd(t, S{}))
+		assertEqual(t, "nil ptr field", roundtripJsn(t, pointerField{}), roundtripStd(t, pointerField{}))
 	})
 
 	t.Run("DoublePointer", func(t *testing.T) {
@@ -284,11 +368,7 @@ func TestArrays(t *testing.T) {
 	})
 
 	t.Run("StructArray", func(t *testing.T) {
-		type P struct {
-			X int `json:"x"`
-		}
-
-		a := [3]P{{1}, {2}, {3}}
+		a := [3]arrayElement{{1}, {2}, {3}}
 
 		assertEqual(t, "[3]P", roundtripJsn(t, a), roundtripStd(t, a))
 	})
@@ -336,36 +416,6 @@ func TestMaps(t *testing.T) {
 
 		assertEqual(t, "map[int,str]", roundtripJsn(t, m), roundtripStd(t, m))
 	})
-}
-
-type OmitStruct struct {
-	Str   string         `json:"str,omitempty"`
-	Int   int            `json:"int,omitempty"`
-	Ptr   *int           `json:"ptr,omitempty"`
-	Slice []int          `json:"slice,omitempty"`
-	Map   map[string]int `json:"map,omitempty"`
-	Time  time.Time      `json:"time,omitempty"`
-	Keep  string         `json:"keep"`
-}
-
-type OmitZeroStruct struct {
-	Str  string    `json:"str,omitzero"`
-	Int  int       `json:"int,omitzero"`
-	Time time.Time `json:"time,omitzero"`
-	Keep string    `json:"keep"`
-}
-
-type IsZeroerImpl struct {
-	Empty bool
-}
-
-func (z IsZeroerImpl) IsZero() bool {
-	return z.Empty
-}
-
-type OmitZeroIsZeroer struct {
-	Val  IsZeroerImpl `json:"val,omitzero"`
-	Keep string       `json:"keep"`
 }
 
 func TestOmitEmpty(t *testing.T) {
@@ -460,39 +510,12 @@ func TestTime(t *testing.T) {
 	})
 }
 
-type ValByteMarshaler struct {
-	V string
-}
-
-func (v ValByteMarshaler) MarshalJSON() ([]byte, error) {
-	return []byte(`{"val":"` + v.V + `"}`), nil
-}
-
-type WriterMarshalerImpl struct {
-	V string
-}
-
-func (w WriterMarshalerImpl) MarshalJSONTo(wr io.Writer) error {
-	_, err := io.WriteString(wr, `{"w":"`+w.V+`"}`)
-
-	return err
-}
-
-func (w WriterMarshalerImpl) MarshalJSON() ([]byte, error) {
-	return []byte(`{"w":"` + w.V + `"}`), nil
-}
-
-type ErrMarshaler struct{}
-
-func (ErrMarshaler) MarshalJSON() ([]byte, error) {
-	return nil, errors.New("marshal failed")
-}
-
 func TestMarshalers(t *testing.T) {
 	t.Run("PtrByteMarshaler", func(t *testing.T) {
 		v := &PtrByteMarshaler{Value: "hello"}
 
 		assertEqual(t, "ptr byte", roundtripJsn(t, v), roundtripStd(t, v))
+		assertEqual(t, "typed ptr byte", roundtripJsnTyped(t, ptrMarshalerEnc, v), roundtripStd(t, v))
 	})
 
 	t.Run("ValByteMarshaler", func(t *testing.T) {
@@ -582,32 +605,29 @@ func TestRecursive(t *testing.T) {
 }
 
 func TestTypedMatchesUntyped(t *testing.T) {
-	cases := []struct {
-		name  string
-		typed func() any
-	}{
-		{"Small", func() any { return *smallData }},
-		{"AllTypes", func() any { return *allTypesData }},
-		{"Medium", func() any { return *medData }},
-		{"Document", func() any { return *docData }},
-		{"WithRaw", func() any { return *rawData }},
-		{"WithEmbed", func() any { return *embedData }},
-	}
+	t.Run("Small", func(t *testing.T) {
+		assertTypedMatchesUntyped(t, smallEnc, smallData)
+	})
 
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			want := roundtripStd(t, c.typed())
-			untyped := roundtripJsn(t, c.typed())
+	t.Run("AllTypes", func(t *testing.T) {
+		assertTypedMatchesUntyped(t, allTypesEnc, allTypesData)
+	})
 
-			assertEqual(t, "untyped vs stdlib", untyped, want)
-		})
-	}
-}
+	t.Run("Medium", func(t *testing.T) {
+		assertTypedMatchesUntyped(t, medEnc, medData)
+	})
 
-type errWriter struct{}
+	t.Run("Document", func(t *testing.T) {
+		assertTypedMatchesUntyped(t, docEnc, docData)
+	})
 
-func (errWriter) Write(p []byte) (int, error) {
-	return 0, errors.New("write failed")
+	t.Run("WithRaw", func(t *testing.T) {
+		assertTypedMatchesUntyped(t, rawEnc, rawData)
+	})
+
+	t.Run("WithEmbed", func(t *testing.T) {
+		assertTypedMatchesUntyped(t, embedEnc, embedData)
+	})
 }
 
 func TestStreaming(t *testing.T) {
@@ -632,25 +652,24 @@ func TestStreaming(t *testing.T) {
 }
 
 func TestAllOmitEmpty(t *testing.T) {
-	type S struct {
-		A string `json:"a,omitempty"`
-		B int    `json:"b,omitempty"`
-	}
-
-	v := S{}
+	v := allOmitEmpty{}
 
 	assertEqual(t, "all omitempty empty", roundtripJsn(t, v), roundtripStd(t, v))
 }
 
 func TestSkipField(t *testing.T) {
-	type S struct {
-		Public  string `json:"public"`
-		private string
-		Hidden  string `json:"-"`
-		Shown   string `json:"shown"`
-	}
-
-	v := S{Public: "p", private: "x", Hidden: "h", Shown: "s"}
+	v := skippedFields{Public: "p", private: "x", Hidden: "h", Shown: "s"}
 
 	assertEqual(t, "skip field", roundtripJsn(t, v), roundtripStd(t, v))
+}
+
+func assertTypedMatchesUntyped[T any](t *testing.T, encoder *jsn.TypedEncoder[T], value *T) {
+	t.Helper()
+
+	want := roundtripStd(t, *value)
+	untyped := roundtripJsn(t, *value)
+	typed := roundtripJsnTyped(t, encoder, value)
+
+	assertEqual(t, "untyped vs stdlib", untyped, want)
+	assertEqual(t, "typed vs stdlib", typed, want)
 }
