@@ -15,14 +15,23 @@ concurrency:
 
 jobs:
   test:
-    name: Test (Go ${{ matrix.go }})
+    name: Test (${{ matrix.directory }}, Go ${{ matrix.go }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        go: ['1.26', 'stable']
+        include:
+          - go: '1.26'
+            directory: .
+          - go: 'stable'
+            directory: .
+          - go: '1.27'
+            directory: bench
     env:
-      GOEXPERIMENT: jsonv2
+      GOTOOLCHAIN: local
+    defaults:
+      run:
+        working-directory: ${{ matrix.directory }}
     steps:
       - uses: actions/checkout@v6
 
@@ -31,6 +40,7 @@ jobs:
         with:
           go-version: ${{ matrix.go }}
           cache: true
+          cache-dependency-path: ${{ matrix.directory }}/go.mod
 
       - name: Download deps
         run: go mod download

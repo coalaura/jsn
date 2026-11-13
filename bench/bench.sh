@@ -4,8 +4,6 @@
 
 	mkdir -p results
 
-	export GOEXPERIMENT=jsonv2
-
 	pat() {
 		printf '^BenchmarkEncode_(%s)_%s$' "$1" "$2"
 	}
