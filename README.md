@@ -98,12 +98,12 @@ Median time per complete-buffer decode, measured on the same date, machine and t
 
 | Payload | Destination | `encoding/json` | `encoding/json/v2` | jsn `Unmarshal` | jsn `TypedDecoder.Unmarshal` |
 | :--- | :--- | ---: | ---: | ---: | ---: |
-| AllTypes | Reused | 1.11 us | 1.14 us | 426.0 ns | 378.8 ns |
-| AllTypes | Fresh | 1.27 us | 1.03 us | 574.6 ns | 523.2 ns |
+| AllTypes | Reused | 1.11 us | 1.14 us | 426.0 ns (0.43us) | 378.8 ns (0.38us) |
+| AllTypes | Fresh | 1.27 us | 1.03 us | 574.6 ns (0.57us) | 523.2 ns (0.52us) |
 | Small | Reused | 512.6 ns | 415.8 ns | 283.4 ns | 243.2 ns |
 | Small | Fresh | 618.9 ns | 503.7 ns | 330.8 ns | 287.9 ns |
-| Medium | Reused | 1.46 us | 1.43 us | 686.9 ns | 660.6 ns |
-| Medium | Fresh | 1.76 us | 1.49 us | 905.3 ns | 908.6 ns |
+| Medium | Reused | 1.46 us | 1.43 us | 686.9 ns (0.69us) | 660.6 ns (0.66us) |
+| Medium | Fresh | 1.76 us | 1.49 us | 905.3 ns (0.91us) | 908.6 ns (0.91us) |
 | Large | Reused | 295.97 us | 334.15 us | 142.69 us | 145.38 us |
 | Large | Fresh | 382.35 us | 362.70 us | 209.40 us | 226.68 us |
 | Deep | Reused | 4.21 us | 4.07 us | 2.10 us | 2.15 us |
