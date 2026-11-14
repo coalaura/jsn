@@ -62,6 +62,7 @@ type Encoder struct {
 	buf            []byte
 	wr             io.Writer
 	flushThreshold int
+	mapScratch     map[reflect.Type]*mapScratchPool
 
 	// scratch holds direct-interface words during encodeAny, including
 	// single-field structs and single-element arrays of direct values.
@@ -1307,47 +1308,7 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 			}
 		}
 
-		enc = func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
-			rv := reflect.NewAt(tp, ptr).Elem()
-			if rv.IsNil() {
-				return append(b, "null"...), nil
-			}
-
-			b = append(b, '{')
-
-			first := true
-
-			iter := rv.MapRange() // heavy fallback :(
-
-			for iter.Next() {
-				if !first {
-					b = append(b, ',')
-				}
-
-				first = false
-
-				var err error
-
-				b, err = appendMapKey(b, iter.Key())
-				if err != nil {
-					return b, err
-				}
-
-				b = append(b, ':')
-
-				b, err = enc.encodeAny(b, iter.Value().Interface())
-				if err != nil {
-					return b, err
-				}
-
-				b, err = enc.maybeFlush(b)
-				if err != nil {
-					return b, err
-				}
-			}
-
-			return append(b, '}'), nil
-		}
+		enc = buildMapEncoder(tp, visiting)
 	case reflect.Struct:
 		if isFlattenable(tp) {
 			enc = buildTapeEncoder(tp, visiting).encode

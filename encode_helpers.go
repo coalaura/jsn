@@ -1,7 +1,6 @@
 package jsn
 
 import (
-	"encoding"
 	"encoding/json"
 	"errors"
 	"reflect"
@@ -25,35 +24,6 @@ func encodeNumber(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
 	}
 
 	return append(b, value...), nil
-}
-
-func appendMapKey(b []byte, key reflect.Value) ([]byte, error) {
-	if key.Kind() == reflect.String {
-		return writeString(b, key.String()), nil
-	}
-
-	if key.Type().Implements(textMarshalerType) {
-		if key.Kind() == reflect.Pointer && key.IsNil() {
-			return append(b, '"', '"'), nil
-		}
-
-		text, err := key.Interface().(encoding.TextMarshaler).MarshalText()
-		if err != nil {
-			return b, err
-		}
-
-		return writeString(b, string(text)), nil
-	}
-
-	b = append(b, '"')
-
-	if key.Kind() >= reflect.Int && key.Kind() <= reflect.Int64 {
-		b = appendInt64Fast(b, key.Int())
-	} else {
-		b = appendUint64Fast(b, key.Uint())
-	}
-
-	return append(b, '"'), nil
 }
 
 func buildQuotedEncoder(tp reflect.Type) encoderFunc {
