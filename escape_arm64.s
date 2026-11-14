@@ -20,8 +20,11 @@
 // Produce four bits per input byte in R4, ordered from least significant.
 // Each comparison lane is 0x00 or 0xff, so narrowing adjacent byte pairs
 // with a four-bit shift preserves one nibble for each byte.
+// Go 1.26 needs raw encodings for two instructions:
+// 0x4e2034c7 = VCMGT V0.B16, V6.B16, V7.B16
+// 0x0f0c84e7 = VSHRN $4, V7.H8, V7.B8
 #define ESCAPE_MASK \
-	VCMGT V0.B16, V6.B16, V7.B16; \
+	WORD $0x4e2034c7; \
 	VCMEQ V1.B16, V0.B16, V8.B16; \
 	VORR V8.B16, V7.B16, V7.B16; \
 	VCMEQ V2.B16, V0.B16, V8.B16; \
@@ -32,7 +35,7 @@
 	VORR V8.B16, V7.B16, V7.B16; \
 	VCMEQ V5.B16, V0.B16, V8.B16; \
 	VORR V8.B16, V7.B16, V7.B16; \
-	VSHRN $4, V7.H8, V7.B8; \
+	WORD $0x0f0c84e7; \
 	VMOV V7.D[0], R4
 
 // func simdFirstEscape(s string) int
