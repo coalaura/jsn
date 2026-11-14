@@ -1,38 +1,33 @@
-                   │ results/json_v1.txt │         results/json_v2.txt          │           results/jsn.txt           │
-                   │       sec/op        │    sec/op     vs base                │   sec/op     vs base                │
-Encode_AllTypes_32           760.2n ± 0%    684.1n ± 0%  -10.00% (p=0.000 n=10)   175.8n ± 1%  -76.87% (p=0.000 n=10)
-Encode_Small_32             195.05n ± 1%   200.65n ± 0%   +2.87% (p=0.000 n=10)   71.06n ± 1%  -63.57% (p=0.000 n=10)
-Encode_Medium_32             854.2n ± 0%    753.8n ± 0%  -11.75% (p=0.000 n=10)   199.0n ± 0%  -76.70% (p=0.000 n=10)
-Encode_Deep_32              2229.0n ± 1%   2262.5n ± 1%   +1.50% (p=0.003 n=10)   729.2n ± 1%  -67.29% (p=0.000 n=10)
-Encode_Map_32               17.504µ ± 0%    6.989µ ± 1%  -60.07% (p=0.000 n=10)   2.532µ ± 0%  -85.53% (p=0.000 n=10)
-Encode_Large_32             183.18µ ± 1%   153.34µ ± 1%  -16.29% (p=0.000 n=10)   44.53µ ± 0%  -75.69% (p=0.000 n=10)
-Encode_Document_32           38.92µ ± 0%    37.76µ ± 1%   -2.98% (p=0.000 n=10)   20.15µ ± 0%  -48.22% (p=0.000 n=10)
-geomean                      4.462µ         3.699µ       -17.11%                  1.224µ       -72.57%
+Median ns/op from 12 samples per cell. Ranges are observed min-max, not confidence intervals.
 
-                   │ results/json_v1.txt │          results/json_v2.txt           │              results/jsn.txt              │
-                   │        B/op         │     B/op      vs base                  │     B/op      vs base                     │
-Encode_AllTypes_32          88.00 ± 0%       56.00 ± 0%  -36.36% (p=0.000 n=10)        0.00 ± 0%  -100.00% (p=0.000 n=10)
-Encode_Small_32             0.000 ± 0%       0.000 ± 0%        ~ (p=1.000 n=10) ¹     0.000 ± 0%         ~ (p=1.000 n=10) ¹
-Encode_Medium_32            48.00 ± 0%       24.00 ± 0%  -50.00% (p=0.000 n=10)        0.00 ± 0%  -100.00% (p=0.000 n=10)
-Encode_Deep_32              0.000 ± 0%       0.000 ± 0%        ~ (p=1.000 n=10) ¹     0.000 ± 0%         ~ (p=1.000 n=10) ¹
-Encode_Map_32             1637.00 ± 0%       32.00 ± 0%  -98.05% (p=0.000 n=10)        0.00 ± 0%  -100.00% (p=0.000 n=10)
-Encode_Large_32          12.583Ki ± 0%     4.719Ki ± 0%  -62.50% (p=0.000 n=10)     0.000Ki ± 0%  -100.00% (p=0.000 n=10)
-Encode_Document_32          272.0 ± 0%       159.0 ± 0%  -41.54% (p=0.000 n=10)         0.0 ± 0%  -100.00% (p=0.000 n=10)
-geomean                                ²                 -61.04%                ²                 ?                       ² ³
-¹ all samples are equal
-² summaries must be >0 to compute geomean
-³ ratios must be >0 to compute geomean
+| Payload | encoding/json | encoding/json/v2 | jsn dynamic | jsn typed |
+| :--- | ---: | ---: | ---: | ---: |
+| AllTypes | 785.30 | 672.80 | 187.30 | 173.50 |
+| Deep | 2360.50 | 2522.00 | 992.55 | 778.80 |
+| Document | 43053.50 | 43804.50 | 22561.50 | 22362.50 |
+| Large | 204630.00 | 175615.50 | 48306.50 | 48062.50 |
+| Map | 19396.00 | 8022.00 | 2500.50 | 2641.50 |
+| Medium | 927.90 | 789.05 | 225.20 | 206.70 |
+| Small | 211.45 | 200.05 | 90.83 | 75.31 |
 
-                   │ results/json_v1.txt │         results/json_v2.txt          │             results/jsn.txt             │
-                   │      allocs/op      │ allocs/op   vs base                  │ allocs/op   vs base                     │
-Encode_AllTypes_32          6.000 ± 0%     4.000 ± 0%  -33.33% (p=0.000 n=10)     0.000 ± 0%  -100.00% (p=0.000 n=10)
-Encode_Small_32             0.000 ± 0%     0.000 ± 0%        ~ (p=1.000 n=10) ¹   0.000 ± 0%         ~ (p=1.000 n=10) ¹
-Encode_Medium_32            5.000 ± 0%     2.000 ± 0%  -60.00% (p=0.000 n=10)     0.000 ± 0%  -100.00% (p=0.000 n=10)
-Encode_Deep_32              0.000 ± 0%     0.000 ± 0%        ~ (p=1.000 n=10) ¹   0.000 ± 0%         ~ (p=1.000 n=10) ¹
-Encode_Map_32             203.000 ± 0%     3.000 ± 0%  -98.52% (p=0.000 n=10)     0.000 ± 0%  -100.00% (p=0.000 n=10)
-Encode_Large_32            1202.0 ± 0%     402.0 ± 0%  -66.56% (p=0.000 n=10)       0.0 ± 0%  -100.00% (p=0.000 n=10)
-Encode_Document_32          19.00 ± 0%     12.00 ± 0%  -36.84% (p=0.000 n=10)      0.00 ± 0%  -100.00% (p=0.000 n=10)
-geomean                                ²               -63.69%                ²               ?                       ² ³
-¹ all samples are equal
-² summaries must be >0 to compute geomean
-³ ratios must be >0 to compute geomean
+Observed ns/op ranges:
+| Payload | encoding/json | encoding/json/v2 | jsn dynamic | jsn typed |
+| :--- | ---: | ---: | ---: | ---: |
+| AllTypes | 774.30-823.90 | 647.70-682.60 | 179.40-194.60 | 169.00-189.10 |
+| Deep | 2290.00-3770.00 | 2365.00-4037.00 | 924.00-1057.00 | 745.60-1001.00 |
+| Document | 41300.00-69719.00 | 41355.00-70802.00 | 20668.00-25930.00 | 20448.00-33641.00 |
+| Large | 191530.00-321498.00 | 163133.00-236729.00 | 44233.00-66289.00 | 44292.00-70903.00 |
+| Map | 18037.00-27270.00 | 7446.00-11524.00 | 2458.00-2717.00 | 2501.00-3573.00 |
+| Medium | 911.70-1053.00 | 765.70-909.40 | 205.10-266.80 | 196.50-263.40 |
+| Small | 206.30-218.80 | 192.10-210.40 | 87.53-112.70 | 73.55-76.49 |
+
+Maximum B/op / allocs/op across samples:
+| Payload | encoding/json | encoding/json/v2 | jsn dynamic | jsn typed |
+| :--- | ---: | ---: | ---: | ---: |
+| AllTypes | 88 / 6 | 56 / 4 | 0 / 0 | 0 / 0 |
+| Deep | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| Document | 279 / 19 | 159 / 12 | 0 / 0 | 0 / 0 |
+| Large | 12953 / 1202 | 4832 / 402 | 0 / 0 | 0 / 0 |
+| Map | 1637 / 203 | 32 / 3 | 0 / 0 | 0 / 0 |
+| Medium | 48 / 5 | 24 / 2 | 0 / 0 | 0 / 0 |
+| Small | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |

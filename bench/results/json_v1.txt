@@ -1,70 +1,144 @@
-BenchmarkEncode_AllTypes_32    	 1000000	       760.0 ns/op	      88 B/op	       6 allocs/op
-BenchmarkEncode_AllTypes_32    	 1000000	       759.4 ns/op	      88 B/op	       6 allocs/op
-BenchmarkEncode_AllTypes_32    	 1000000	       758.7 ns/op	      88 B/op	       6 allocs/op
-BenchmarkEncode_AllTypes_32    	 1000000	       760.4 ns/op	      88 B/op	       6 allocs/op
-BenchmarkEncode_AllTypes_32    	 1000000	       759.4 ns/op	      88 B/op	       6 allocs/op
-BenchmarkEncode_AllTypes_32    	 1000000	       755.3 ns/op	      88 B/op	       6 allocs/op
-BenchmarkEncode_AllTypes_32    	 1000000	       763.6 ns/op	      88 B/op	       6 allocs/op
-BenchmarkEncode_AllTypes_32    	 1000000	       760.9 ns/op	      88 B/op	       6 allocs/op
-BenchmarkEncode_AllTypes_32    	 1000000	       762.6 ns/op	      88 B/op	       6 allocs/op
-BenchmarkEncode_AllTypes_32    	 1000000	       761.0 ns/op	      88 B/op	       6 allocs/op
-BenchmarkEncode_Small_32       	 1000000	       194.9 ns/op	       0 B/op	       0 allocs/op
-BenchmarkEncode_Small_32       	 1000000	       195.6 ns/op	       0 B/op	       0 allocs/op
-BenchmarkEncode_Small_32       	 1000000	       195.2 ns/op	       0 B/op	       0 allocs/op
-BenchmarkEncode_Small_32       	 1000000	       195.7 ns/op	       0 B/op	       0 allocs/op
-BenchmarkEncode_Small_32       	 1000000	       195.3 ns/op	       0 B/op	       0 allocs/op
-BenchmarkEncode_Small_32       	 1000000	       196.5 ns/op	       0 B/op	       0 allocs/op
-BenchmarkEncode_Small_32       	 1000000	       193.4 ns/op	       0 B/op	       0 allocs/op
-BenchmarkEncode_Small_32       	 1000000	       194.3 ns/op	       0 B/op	       0 allocs/op
-BenchmarkEncode_Small_32       	 1000000	       194.7 ns/op	       0 B/op	       0 allocs/op
-BenchmarkEncode_Small_32       	 1000000	       192.9 ns/op	       0 B/op	       0 allocs/op
-BenchmarkEncode_Medium_32      	 1000000	       856.0 ns/op	      48 B/op	       5 allocs/op
-BenchmarkEncode_Medium_32      	 1000000	       857.3 ns/op	      48 B/op	       5 allocs/op
-BenchmarkEncode_Medium_32      	 1000000	       858.8 ns/op	      48 B/op	       5 allocs/op
-BenchmarkEncode_Medium_32      	 1000000	       856.7 ns/op	      48 B/op	       5 allocs/op
-BenchmarkEncode_Medium_32      	 1000000	       852.6 ns/op	      48 B/op	       5 allocs/op
-BenchmarkEncode_Medium_32      	 1000000	       851.3 ns/op	      48 B/op	       5 allocs/op
-BenchmarkEncode_Medium_32      	 1000000	       852.8 ns/op	      48 B/op	       5 allocs/op
-BenchmarkEncode_Medium_32      	 1000000	       850.5 ns/op	      48 B/op	       5 allocs/op
-BenchmarkEncode_Medium_32      	 1000000	       850.5 ns/op	      48 B/op	       5 allocs/op
-BenchmarkEncode_Medium_32      	 1000000	       855.6 ns/op	      48 B/op	       5 allocs/op
-BenchmarkEncode_Deep_32        	 1000000	      2226 ns/op	       0 B/op	       0 allocs/op
-BenchmarkEncode_Deep_32        	 1000000	      2212 ns/op	       0 B/op	       0 allocs/op
-BenchmarkEncode_Deep_32        	 1000000	      2232 ns/op	       0 B/op	       0 allocs/op
-BenchmarkEncode_Deep_32        	 1000000	      2223 ns/op	       0 B/op	       0 allocs/op
-BenchmarkEncode_Deep_32        	 1000000	      2223 ns/op	       0 B/op	       0 allocs/op
-BenchmarkEncode_Deep_32        	 1000000	      2257 ns/op	       0 B/op	       0 allocs/op
-BenchmarkEncode_Deep_32        	 1000000	      2259 ns/op	       0 B/op	       0 allocs/op
-BenchmarkEncode_Deep_32        	 1000000	      2208 ns/op	       0 B/op	       0 allocs/op
-BenchmarkEncode_Deep_32        	 1000000	      2232 ns/op	       0 B/op	       0 allocs/op
-BenchmarkEncode_Deep_32        	 1000000	      2260 ns/op	       0 B/op	       0 allocs/op
-BenchmarkEncode_Map_32         	 1000000	     17499 ns/op	    1637 B/op	     203 allocs/op
-BenchmarkEncode_Map_32         	 1000000	     17506 ns/op	    1637 B/op	     203 allocs/op
-BenchmarkEncode_Map_32         	 1000000	     17470 ns/op	    1637 B/op	     203 allocs/op
-BenchmarkEncode_Map_32         	 1000000	     17495 ns/op	    1637 B/op	     203 allocs/op
-BenchmarkEncode_Map_32         	 1000000	     17569 ns/op	    1637 B/op	     203 allocs/op
-BenchmarkEncode_Map_32         	 1000000	     17535 ns/op	    1637 B/op	     203 allocs/op
-BenchmarkEncode_Map_32         	 1000000	     17440 ns/op	    1637 B/op	     203 allocs/op
-BenchmarkEncode_Map_32         	 1000000	     17526 ns/op	    1637 B/op	     203 allocs/op
-BenchmarkEncode_Map_32         	 1000000	     17512 ns/op	    1637 B/op	     203 allocs/op
-BenchmarkEncode_Map_32         	 1000000	     17502 ns/op	    1637 B/op	     203 allocs/op
-BenchmarkEncode_Large_32       	   19635	    183144 ns/op	   12884 B/op	    1202 allocs/op
-BenchmarkEncode_Large_32       	   19646	    183372 ns/op	   12884 B/op	    1202 allocs/op
-BenchmarkEncode_Large_32       	   19500	    184893 ns/op	   12885 B/op	    1202 allocs/op
-BenchmarkEncode_Large_32       	   19468	    184751 ns/op	   12882 B/op	    1202 allocs/op
-BenchmarkEncode_Large_32       	   19461	    184133 ns/op	   12885 B/op	    1202 allocs/op
-BenchmarkEncode_Large_32       	   19710	    182779 ns/op	   12885 B/op	    1202 allocs/op
-BenchmarkEncode_Large_32       	   19692	    182963 ns/op	   12885 B/op	    1202 allocs/op
-BenchmarkEncode_Large_32       	   19706	    182460 ns/op	   12884 B/op	    1202 allocs/op
-BenchmarkEncode_Large_32       	   19723	    182572 ns/op	   12884 B/op	    1202 allocs/op
-BenchmarkEncode_Large_32       	   19674	    183216 ns/op	   12885 B/op	    1202 allocs/op
-BenchmarkEncode_Document_32    	   91582	     39114 ns/op	     272 B/op	      19 allocs/op
-BenchmarkEncode_Document_32    	   92949	     38891 ns/op	     272 B/op	      19 allocs/op
-BenchmarkEncode_Document_32    	   92889	     38953 ns/op	     272 B/op	      19 allocs/op
-BenchmarkEncode_Document_32    	   92319	     39103 ns/op	     272 B/op	      19 allocs/op
-BenchmarkEncode_Document_32    	   92976	     38823 ns/op	     272 B/op	      19 allocs/op
-BenchmarkEncode_Document_32    	   91945	     39043 ns/op	     272 B/op	      19 allocs/op
-BenchmarkEncode_Document_32    	   93174	     38985 ns/op	     272 B/op	      19 allocs/op
-BenchmarkEncode_Document_32    	   91681	     38837 ns/op	     272 B/op	      19 allocs/op
-BenchmarkEncode_Document_32    	   92856	     38781 ns/op	     272 B/op	      19 allocs/op
-BenchmarkEncode_Document_32    	   92763	     38882 ns/op	     272 B/op	      19 allocs/op
+goos: windows
+goarch: amd64
+pkg: github.com/coalaura/jsn/bench
+cpu: AMD Ryzen 9 9950X3D 16-Core Processor
+BenchmarkEncode_AllTypes_Std-32    	 1499712	       797.4 ns/op	 287.19 MB/s	      88 B/op	       6 allocs/op
+BenchmarkEncode_Small_Std-32       	 5418381	       218.1 ns/op	 628.08 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Medium_Std-32      	 1297568	       922.2 ns/op	 348.08 MB/s	      48 B/op	       5 allocs/op
+BenchmarkEncode_Large_Std-32       	    6368	    195041 ns/op	 385.33 MB/s	   12888 B/op	    1202 allocs/op
+BenchmarkEncode_Deep_Std-32        	  496610	      2319 ns/op	 360.13 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Map_Std-32         	   66094	     18323 ns/op	  97.20 MB/s	    1637 B/op	     203 allocs/op
+BenchmarkEncode_Document_Std-32    	   28690	     42121 ns/op	1452.71 MB/s	     272 B/op	      19 allocs/op
+PASS
+goos: windows
+goarch: amd64
+pkg: github.com/coalaura/jsn/bench
+cpu: AMD Ryzen 9 9950X3D 16-Core Processor
+BenchmarkEncode_AllTypes_Std-32    	 1505560	       791.8 ns/op	 289.20 MB/s	      88 B/op	       6 allocs/op
+BenchmarkEncode_Small_Std-32       	 5623484	       212.1 ns/op	 645.96 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Medium_Std-32      	 1321507	       911.7 ns/op	 352.10 MB/s	      48 B/op	       5 allocs/op
+BenchmarkEncode_Large_Std-32       	    6082	    191530 ns/op	 392.39 MB/s	   12888 B/op	    1202 allocs/op
+BenchmarkEncode_Deep_Std-32        	  506598	      2345 ns/op	 356.05 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Map_Std-32         	   65445	     18037 ns/op	  98.74 MB/s	    1637 B/op	     203 allocs/op
+BenchmarkEncode_Document_Std-32    	   28860	     41300 ns/op	1481.61 MB/s	     279 B/op	      19 allocs/op
+PASS
+goos: windows
+goarch: amd64
+pkg: github.com/coalaura/jsn/bench
+cpu: AMD Ryzen 9 9950X3D 16-Core Processor
+BenchmarkEncode_AllTypes_Std-32    	 1470476	       823.9 ns/op	 277.96 MB/s	      88 B/op	       6 allocs/op
+BenchmarkEncode_Small_Std-32       	 5596377	       217.6 ns/op	 629.47 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Medium_Std-32      	 1285676	       947.2 ns/op	 338.88 MB/s	      48 B/op	       5 allocs/op
+BenchmarkEncode_Large_Std-32       	    4678	    214211 ns/op	 350.85 MB/s	   12890 B/op	    1202 allocs/op
+BenchmarkEncode_Deep_Std-32        	  464415	      2537 ns/op	 329.19 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Map_Std-32         	   57910	     20619 ns/op	  86.38 MB/s	    1637 B/op	     203 allocs/op
+BenchmarkEncode_Document_Std-32    	   26552	     45325 ns/op	1350.01 MB/s	     272 B/op	      19 allocs/op
+PASS
+goos: windows
+goarch: amd64
+pkg: github.com/coalaura/jsn/bench
+cpu: AMD Ryzen 9 9950X3D 16-Core Processor
+BenchmarkEncode_AllTypes_Std-32    	 1546269	       781.7 ns/op	 292.94 MB/s	      88 B/op	       6 allocs/op
+BenchmarkEncode_Small_Std-32       	 5798288	       209.9 ns/op	 652.63 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Medium_Std-32      	 1312021	       918.2 ns/op	 349.61 MB/s	      48 B/op	       5 allocs/op
+BenchmarkEncode_Large_Std-32       	    6236	    198463 ns/op	 378.68 MB/s	   12893 B/op	    1202 allocs/op
+BenchmarkEncode_Deep_Std-32        	  518541	      2364 ns/op	 353.23 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Map_Std-32         	   57919	     20516 ns/op	  86.81 MB/s	    1637 B/op	     203 allocs/op
+BenchmarkEncode_Document_Std-32    	   28598	     42712 ns/op	1432.63 MB/s	     272 B/op	      19 allocs/op
+PASS
+goos: windows
+goarch: amd64
+pkg: github.com/coalaura/jsn/bench
+cpu: AMD Ryzen 9 9950X3D 16-Core Processor
+BenchmarkEncode_AllTypes_Std-32    	 1553130	       774.3 ns/op	 295.74 MB/s	      88 B/op	       6 allocs/op
+BenchmarkEncode_Small_Std-32       	 5753455	       208.1 ns/op	 658.30 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Medium_Std-32      	 1297762	       928.4 ns/op	 345.75 MB/s	      48 B/op	       5 allocs/op
+BenchmarkEncode_Large_Std-32       	    5956	    198558 ns/op	 378.50 MB/s	   12893 B/op	    1202 allocs/op
+BenchmarkEncode_Deep_Std-32        	  511801	      2357 ns/op	 354.28 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Map_Std-32         	   62812	     18944 ns/op	  94.02 MB/s	    1637 B/op	     203 allocs/op
+BenchmarkEncode_Document_Std-32    	   27832	     42970 ns/op	1424.02 MB/s	     272 B/op	      19 allocs/op
+PASS
+goos: windows
+goarch: amd64
+pkg: github.com/coalaura/jsn/bench
+cpu: AMD Ryzen 9 9950X3D 16-Core Processor
+BenchmarkEncode_AllTypes_Std-32    	 1533778	       780.8 ns/op	 293.28 MB/s	      88 B/op	       6 allocs/op
+BenchmarkEncode_Small_Std-32       	 5745452	       209.8 ns/op	 653.00 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Medium_Std-32      	 1316001	       927.4 ns/op	 346.12 MB/s	      48 B/op	       5 allocs/op
+BenchmarkEncode_Large_Std-32       	    6073	    201687 ns/op	 372.63 MB/s	   12953 B/op	    1202 allocs/op
+BenchmarkEncode_Deep_Std-32        	  510349	      2356 ns/op	 354.44 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Map_Std-32         	   63140	     19204 ns/op	  92.74 MB/s	    1637 B/op	     203 allocs/op
+BenchmarkEncode_Document_Std-32    	   26803	     43590 ns/op	1403.76 MB/s	     272 B/op	      19 allocs/op
+PASS
+goos: windows
+goarch: amd64
+pkg: github.com/coalaura/jsn/bench
+cpu: AMD Ryzen 9 9950X3D 16-Core Processor
+BenchmarkEncode_AllTypes_Std-32    	 1488696	       790.3 ns/op	 289.76 MB/s	      88 B/op	       6 allocs/op
+BenchmarkEncode_Small_Std-32       	 5798907	       206.3 ns/op	 663.96 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Medium_Std-32      	 1292413	       942.7 ns/op	 340.50 MB/s	      48 B/op	       5 allocs/op
+BenchmarkEncode_Large_Std-32       	    5923	    209292 ns/op	 359.09 MB/s	   12952 B/op	    1202 allocs/op
+BenchmarkEncode_Deep_Std-32        	  491887	      2519 ns/op	 331.45 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Map_Std-32         	   60488	     20095 ns/op	  88.63 MB/s	    1637 B/op	     203 allocs/op
+BenchmarkEncode_Document_Std-32    	   26421	     45255 ns/op	1352.12 MB/s	     272 B/op	      19 allocs/op
+PASS
+goos: windows
+goarch: amd64
+pkg: github.com/coalaura/jsn/bench
+cpu: AMD Ryzen 9 9950X3D 16-Core Processor
+BenchmarkEncode_AllTypes_Std-32    	 1549368	       775.2 ns/op	 295.42 MB/s	      88 B/op	       6 allocs/op
+BenchmarkEncode_Small_Std-32       	 5706627	       210.8 ns/op	 649.80 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Medium_Std-32      	 1000000	      1027 ns/op	 312.55 MB/s	      48 B/op	       5 allocs/op
+BenchmarkEncode_Large_Std-32       	    3718	    321498 ns/op	 233.76 MB/s	   12887 B/op	    1202 allocs/op
+BenchmarkEncode_Deep_Std-32        	  349479	      3770 ns/op	 221.47 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Map_Std-32         	   43779	     27270 ns/op	  65.31 MB/s	    1637 B/op	     203 allocs/op
+BenchmarkEncode_Document_Std-32    	   16669	     69719 ns/op	 877.66 MB/s	     272 B/op	      19 allocs/op
+PASS
+goos: windows
+goarch: amd64
+pkg: github.com/coalaura/jsn/bench
+cpu: AMD Ryzen 9 9950X3D 16-Core Processor
+BenchmarkEncode_AllTypes_Std-32    	 1533088	       780.9 ns/op	 293.26 MB/s	      88 B/op	       6 allocs/op
+BenchmarkEncode_Small_Std-32       	 5735071	       208.8 ns/op	 656.12 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Medium_Std-32      	 1327833	       925.9 ns/op	 346.69 MB/s	      48 B/op	       5 allocs/op
+BenchmarkEncode_Large_Std-32       	    5750	    207573 ns/op	 362.07 MB/s	   12888 B/op	    1202 allocs/op
+BenchmarkEncode_Deep_Std-32        	  501288	      2406 ns/op	 347.06 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Map_Std-32         	   62336	     19588 ns/op	  90.92 MB/s	    1637 B/op	     203 allocs/op
+BenchmarkEncode_Document_Std-32    	   27433	     43137 ns/op	1418.51 MB/s	     272 B/op	      19 allocs/op
+PASS
+goos: windows
+goarch: amd64
+pkg: github.com/coalaura/jsn/bench
+cpu: AMD Ryzen 9 9950X3D 16-Core Processor
+BenchmarkEncode_AllTypes_Std-32    	 1547952	       777.8 ns/op	 294.43 MB/s	      88 B/op	       6 allocs/op
+BenchmarkEncode_Small_Std-32       	 5606139	       212.5 ns/op	 644.82 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Medium_Std-32      	 1295226	       941.4 ns/op	 340.97 MB/s	      48 B/op	       5 allocs/op
+BenchmarkEncode_Large_Std-32       	    5156	    213871 ns/op	 351.40 MB/s	   12891 B/op	    1202 allocs/op
+BenchmarkEncode_Deep_Std-32        	  490634	      2457 ns/op	 339.89 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Map_Std-32         	   62001	     20091 ns/op	  88.65 MB/s	    1637 B/op	     203 allocs/op
+BenchmarkEncode_Document_Std-32    	   26703	     44806 ns/op	1365.68 MB/s	     272 B/op	      19 allocs/op
+PASS
+goos: windows
+goarch: amd64
+pkg: github.com/coalaura/jsn/bench
+cpu: AMD Ryzen 9 9950X3D 16-Core Processor
+BenchmarkEncode_AllTypes_Std-32    	 1508046	       788.9 ns/op	 290.26 MB/s	      88 B/op	       6 allocs/op
+BenchmarkEncode_Small_Std-32       	 5656654	       212.5 ns/op	 644.56 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Medium_Std-32      	 1309959	       913.2 ns/op	 351.52 MB/s	      48 B/op	       5 allocs/op
+BenchmarkEncode_Large_Std-32       	    5149	    197681 ns/op	 380.18 MB/s	   12893 B/op	    1202 allocs/op
+BenchmarkEncode_Deep_Std-32        	  512844	      2290 ns/op	 364.57 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Map_Std-32         	   62241	     19025 ns/op	  93.62 MB/s	    1637 B/op	     203 allocs/op
+BenchmarkEncode_Document_Std-32    	   28856	     41898 ns/op	1460.45 MB/s	     272 B/op	      19 allocs/op
+PASS
+goos: windows
+goarch: amd64
+pkg: github.com/coalaura/jsn/bench
+cpu: AMD Ryzen 9 9950X3D 16-Core Processor
+BenchmarkEncode_AllTypes_Std-32    	 1517824	       791.1 ns/op	 289.49 MB/s	      88 B/op	       6 allocs/op
+BenchmarkEncode_Small_Std-32       	 5414487	       218.8 ns/op	 626.11 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Medium_Std-32      	 1000000	      1053 ns/op	 304.71 MB/s	      48 B/op	       5 allocs/op
+BenchmarkEncode_Large_Std-32       	    5006	    231606 ns/op	 324.50 MB/s	   12891 B/op	    1202 allocs/op
+BenchmarkEncode_Deep_Std-32        	  508536	      2323 ns/op	 359.50 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Map_Std-32         	   62817	     18847 ns/op	  94.50 MB/s	    1637 B/op	     203 allocs/op
+BenchmarkEncode_Document_Std-32    	   28520	     41881 ns/op	1461.06 MB/s	     272 B/op	      19 allocs/op
+PASS

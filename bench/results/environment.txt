@@ -1,0 +1,52 @@
+utc: 2026-11-14T16:14:05Z
+samples: 12
+benchtime: 1s
+warmup: 100 encodes per sample
+order: rotate Std, Std2, Jsn, JsnTyped each round
+sink: io.Discard; reused encoder and input; compilation excluded
+escaping: HTML and JavaScript enabled for all implementations
+ordering: Std sorts map keys; Std2 and jsn do not
+go version go1.27.4 windows/amd64
+{
+	"GOAMD64": "v1",
+	"GOARCH": "amd64",
+	"GOARM64": "",
+	"GOEXPERIMENT": "",
+	"GOFLAGS": "",
+	"GOOS": "windows",
+	"GOTOOLCHAIN": "auto"
+}
+GOMAXPROCS: default
+GODEBUG: default
+commit: d0902d16741f9f65ff98b5049b56991b6358ba6f
+ M bench.sh
+ M bench_test.go
+?? comparison_test.go
+?? report/
+?? results/.run.AKSWyg/
+source hashes (git blob SHA, path):
+e14c4aa49828b515f22b29da97e92df4a69c2545 ../backend_bench_test.go
+84ae5d998b6d817647b5fe3517983fcc5c9cc3b0 ../backend_test.go
+32f34eaa405c6f0a97795eb6850c31cfa20fa9e7 ../collections.go
+5f4028f2dbb32cd2a0fa7e94478fc4108ec38fd9 ../correctness_test.go
+7a7c5e081e43acf20bdb738282580c7f9af61eac ../encode_helpers.go
+4da68f34b7084aba2fda72d0e5a7b09af4473cf7 ../escape_amd64.go
+861a0281018a3bd5bdc9776120c52e2dd32eb97f ../escape_arm64.go
+d4c2885cb726a03e5fe6bde13f554904af9e6f25 ../escape_generic.go
+5e182f252d7d9f8245b4833c6e06a09c28875c0f ../escape_test.go
+8f8ce25e3f180730cac0e656cc36f9617a4f0511 ../fields.go
+342b7c5db5e4a68c62976130adb9a8201b4e31f7 ../fixed.go
+6e32ffa6bfddc0e32dc9081b5231ca0c08862405 ../ints.go
+94f4367e948efb869d8afd044e83c3a1f2eb6669 ../jsn.go
+35f2e00e76b117ca1d81fd774f284053ebf617df ../map.go
+dba7f7be1bf8d3c0d978f2c60f8ed998784e34ec ../map_test.go
+84fc9a216656f88acd886006d1cf05f15e0acfdf ../safeset_test.go
+d52aae91166f3e348cba91404e2f1dbebf1f9fe5 ../escape_amd64.s
+d52acdaf1e260a228ba3ae16c18a04cab66d65d9 ../escape_arm64.s
+f4cd96b479ff808fb1f0217bdd59891b9c69078e ./bench_test.go
+ef89d122506b60c772610b151d5ecc127ccbde94 ./comparison_test.go
+a3257c69397b15203e1cf418449250bde187f4f9 ./jsn_test.go
+759dd90fa3e1b3a5fd519ee6d8a9d5ee45cf77a4 bench.sh
+a1ed9dae06224686ba9dacaf8353e1248ab7d5f0 go.mod
+86acfc1527767a6af87717578bb5e25f2ff91f8d report/main.go
+57d4650d67fac1dad51864d746a3b19fc32fb0cc report/main_test.go

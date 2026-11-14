@@ -44,15 +44,26 @@ func main() {
 
 ## Performance Benchmarks
 
-Below is a comparison of `jsn.TypedEncoder` against Go standard libraries `encoding/json` (v1) and `encoding/json/v2` (running with `GOEXPERIMENT=jsonv2`) across various payloads:
+Median time per encode, measured on 2026-11-14 with Go 1.27.4, Windows/amd64 (`GOAMD64=v1`, default `GOEXPERIMENT`) and an AMD Ryzen 9 9950X3D. Each cell contains 12 one-second samples from the same compiled benchmark binary, with library execution order rotated each round. Every sample performs 100 untimed warm-up encodes before measurement.
 
-| Payload | `encoding/json` (v1) | `encoding/json/v2` | `coalaura/jsn` | vs. v1 | vs. v2 |
-| :--- | ---: | ---: | ---: | ---: | ---: |
-| AllTypes | 760.2ns | 684.1ns | **175.8ns** | 4.32× | 3.89× |
-| Small | 195.05ns | 200.65ns | **71.06ns** | 2.74× | 2.82× |
-| Medium | 854.2ns | 753.8ns | **199.0ns** | 4.29× | 3.79× |
-| Large | 183.18µs | 153.34µs | **44.53µs** | 4.11× | 3.44× |
-| Deep | 2229.0ns | 2262.5ns | **729.2ns** | 3.06× | 3.10× |
-| Map | 17.504µs | 6.989µs | **2.532µs** | 6.91× | 2.76× |
-| Document | 38.92µs | 37.76µs | **20.15µs** | 1.93× | 1.87× |
-| **geomean** | 4.462µs | 3.699µs | **1.224µs** | **3.65×** | **3.02×** |
+| Payload | `encoding/json` | `encoding/json/v2` | jsn `Encoder.Encode` | jsn `TypedEncoder.Encode` |
+| :--- | ---: | ---: | ---: | ---: |
+| AllTypes | 785.30 ns | 672.80 ns | 187.30 ns | 173.50 ns |
+| Small | 211.45 ns | 200.05 ns | 90.83 ns | 75.31 ns |
+| Medium | 927.90 ns | 789.05 ns | 225.20 ns | 206.70 ns |
+| Large | 204.63 us | 175.62 us | 48.31 us | 48.06 us |
+| Deep | 2.36 us | 2.52 us | 992.55 ns | 778.80 ns |
+| Map | 19.40 us | 8.02 us | 2.50 us | 2.64 us |
+| Document | 43.05 us | 43.80 us | 22.56 us | 22.36 us |
+
+Both jsn APIs reported **0 B/op and 0 allocs/op in every sample**. These are warmed, steady-state measurements into `io.Discard`, reusing heap-resident input values and encoder buffers. Encoder construction, type compilation and fixture validation are outside the timed loops; these numbers do not measure first-use cost or fresh-input allocations.
+
+All implementations enable HTML and JavaScript escaping. Each benchmark validates UTF-8, JSON content, output length and newline framing before timing and checks errors during warm-up and measurement. `encoding/json` sorts map keys; jsn and the configured v2 encoder do not, so map-containing rows include that additional work for `encoding/json`.
+
+Run the comparison from the repository root with Go 1.27 or later:
+
+```bash
+bash bench/bench.sh
+```
+
+The runner tests the suite, rebuilds once and reruns every implementation without reusing old baselines. Override the sampling settings with `BENCH_COUNT=12 BENCH_TIME=1s`. [Raw samples and environment/source metadata](bench/results/) are retained alongside the [median, observed range and allocation tables](bench/benchstats.txt). Some samples have substantial timing variation; ranges are reported rather than discarded and are not confidence intervals. Results are specific to this machine and toolchain.

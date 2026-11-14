@@ -1,0 +1,144 @@
+goos: windows
+goarch: amd64
+pkg: github.com/coalaura/jsn/bench
+cpu: AMD Ryzen 9 9950X3D 16-Core Processor
+BenchmarkEncode_AllTypes_JsnTyped-32    	 6633774	       173.6 ns/op	1319.27 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Small_JsnTyped-32       	15445645	        75.41 ns/op	1816.68 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Medium_JsnTyped-32      	 6224275	       196.5 ns/op	1633.70 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Large_JsnTyped-32       	   26712	     44292 ns/op	1696.83 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Deep_JsnTyped-32        	 1620090	       745.6 ns/op	1119.83 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Document_JsnTyped-32    	   58198	     20949 ns/op	2920.90 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Map_JsnTyped-32         	  486307	      2501 ns/op	 712.10 MB/s	       0 B/op	       0 allocs/op
+PASS
+goos: windows
+goarch: amd64
+pkg: github.com/coalaura/jsn/bench
+cpu: AMD Ryzen 9 9950X3D 16-Core Processor
+BenchmarkEncode_AllTypes_JsnTyped-32    	 6962078	       175.1 ns/op	1307.89 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Small_JsnTyped-32       	16218494	        75.75 ns/op	1808.64 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Medium_JsnTyped-32      	 5967750	       200.6 ns/op	1600.49 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Large_JsnTyped-32       	   26602	     44415 ns/op	1692.13 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Deep_JsnTyped-32        	 1572568	       759.9 ns/op	1098.87 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Document_JsnTyped-32    	   57447	     20448 ns/op	2992.43 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Map_JsnTyped-32         	  486931	      2527 ns/op	 704.90 MB/s	       0 B/op	       0 allocs/op
+PASS
+goos: windows
+goarch: amd64
+pkg: github.com/coalaura/jsn/bench
+cpu: AMD Ryzen 9 9950X3D 16-Core Processor
+BenchmarkEncode_AllTypes_JsnTyped-32    	 6386552	       185.3 ns/op	1235.93 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Small_JsnTyped-32       	15031867	        76.01 ns/op	1802.49 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Medium_JsnTyped-32      	 6323850	       197.4 ns/op	1626.54 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Large_JsnTyped-32       	   26644	     45066 ns/op	1667.66 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Deep_JsnTyped-32        	 1585720	       757.5 ns/op	1102.30 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Document_JsnTyped-32    	   56689	     22220 ns/op	2753.78 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Map_JsnTyped-32         	  478009	      2611 ns/op	 682.01 MB/s	       0 B/op	       0 allocs/op
+PASS
+goos: windows
+goarch: amd64
+pkg: github.com/coalaura/jsn/bench
+cpu: AMD Ryzen 9 9950X3D 16-Core Processor
+BenchmarkEncode_AllTypes_JsnTyped-32    	 6418378	       189.1 ns/op	1211.09 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Small_JsnTyped-32       	14928844	        75.20 ns/op	1821.78 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Medium_JsnTyped-32      	 6309529	       204.5 ns/op	1569.51 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Large_JsnTyped-32       	   22744	     53177 ns/op	1413.30 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Deep_JsnTyped-32        	 1473309	       811.5 ns/op	1028.92 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Document_JsnTyped-32    	   53060	     22505 ns/op	2718.95 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Map_JsnTyped-32         	  446581	      2753 ns/op	 647.01 MB/s	       0 B/op	       0 allocs/op
+PASS
+goos: windows
+goarch: amd64
+pkg: github.com/coalaura/jsn/bench
+cpu: AMD Ryzen 9 9950X3D 16-Core Processor
+BenchmarkEncode_AllTypes_JsnTyped-32    	 7059254	       173.6 ns/op	1318.82 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Small_JsnTyped-32       	16088378	        74.79 ns/op	1831.90 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Medium_JsnTyped-32      	 6202146	       203.3 ns/op	1579.07 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Large_JsnTyped-32       	   25738	     48044 ns/op	1564.31 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Deep_JsnTyped-32        	 1451833	       817.2 ns/op	1021.81 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Document_JsnTyped-32    	   54384	     21496 ns/op	2846.62 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Map_JsnTyped-32         	  483622	      2585 ns/op	 689.07 MB/s	       0 B/op	       0 allocs/op
+PASS
+goos: windows
+goarch: amd64
+pkg: github.com/coalaura/jsn/bench
+cpu: AMD Ryzen 9 9950X3D 16-Core Processor
+BenchmarkEncode_AllTypes_JsnTyped-32    	 6850820	       172.9 ns/op	1324.80 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Small_JsnTyped-32       	16010181	        74.55 ns/op	1837.74 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Medium_JsnTyped-32      	 6271072	       206.0 ns/op	1558.15 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Large_JsnTyped-32       	   26553	     46488 ns/op	1616.67 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Deep_JsnTyped-32        	 1552003	       776.1 ns/op	1075.95 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Document_JsnTyped-32    	   55707	     21173 ns/op	2889.98 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Map_JsnTyped-32         	  490434	      2569 ns/op	 693.38 MB/s	       0 B/op	       0 allocs/op
+PASS
+goos: windows
+goarch: amd64
+pkg: github.com/coalaura/jsn/bench
+cpu: AMD Ryzen 9 9950X3D 16-Core Processor
+BenchmarkEncode_AllTypes_JsnTyped-32    	 6929310	       171.6 ns/op	1334.31 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Small_JsnTyped-32       	15924939	        74.97 ns/op	1827.51 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Medium_JsnTyped-32      	 6227030	       213.6 ns/op	1502.81 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Large_JsnTyped-32       	   23745	     51434 ns/op	1461.21 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Deep_JsnTyped-32        	 1544566	       772.3 ns/op	1081.13 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Document_JsnTyped-32    	   52918	     23081 ns/op	2651.14 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Map_JsnTyped-32         	  453103	      2741 ns/op	 649.81 MB/s	       0 B/op	       0 allocs/op
+PASS
+goos: windows
+goarch: amd64
+pkg: github.com/coalaura/jsn/bench
+cpu: AMD Ryzen 9 9950X3D 16-Core Processor
+BenchmarkEncode_AllTypes_JsnTyped-32    	 7161463	       169.0 ns/op	1354.64 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Small_JsnTyped-32       	16721918	        73.55 ns/op	1862.76 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Medium_JsnTyped-32      	 6306730	       263.4 ns/op	1218.59 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Large_JsnTyped-32       	   16290	     70903 ns/op	1059.97 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Deep_JsnTyped-32        	 1000000	      1001 ns/op	 834.42 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Document_JsnTyped-32    	   36456	     33641 ns/op	1818.93 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Map_JsnTyped-32         	  399434	      3573 ns/op	 498.39 MB/s	       0 B/op	       0 allocs/op
+PASS
+goos: windows
+goarch: amd64
+pkg: github.com/coalaura/jsn/bench
+cpu: AMD Ryzen 9 9950X3D 16-Core Processor
+BenchmarkEncode_AllTypes_JsnTyped-32    	 6962725	       173.4 ns/op	1320.80 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Small_JsnTyped-32       	15816548	        74.69 ns/op	1834.36 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Medium_JsnTyped-32      	 5932394	       208.3 ns/op	1540.99 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Large_JsnTyped-32       	   25244	     48093 ns/op	1562.70 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Deep_JsnTyped-32        	 1500928	       813.1 ns/op	1026.94 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Document_JsnTyped-32    	   54207	     22573 ns/op	2710.79 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Map_JsnTyped-32         	  458818	      2686 ns/op	 663.16 MB/s	       0 B/op	       0 allocs/op
+PASS
+goos: windows
+goarch: amd64
+pkg: github.com/coalaura/jsn/bench
+cpu: AMD Ryzen 9 9950X3D 16-Core Processor
+BenchmarkEncode_AllTypes_JsnTyped-32    	 6837345	       173.9 ns/op	1316.58 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Small_JsnTyped-32       	15675352	        75.76 ns/op	1808.26 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Medium_JsnTyped-32      	 6047478	       235.2 ns/op	1365.03 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Large_JsnTyped-32       	   20306	     52123 ns/op	1441.88 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Deep_JsnTyped-32        	 1609756	       748.9 ns/op	1115.03 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Document_JsnTyped-32    	   59206	     20721 ns/op	2952.99 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Map_JsnTyped-32         	  477111	      2521 ns/op	 706.34 MB/s	       0 B/op	       0 allocs/op
+PASS
+goos: windows
+goarch: amd64
+pkg: github.com/coalaura/jsn/bench
+cpu: AMD Ryzen 9 9950X3D 16-Core Processor
+BenchmarkEncode_AllTypes_JsnTyped-32    	 7067666	       171.2 ns/op	1337.59 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Small_JsnTyped-32       	16041751	        75.76 ns/op	1808.27 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Medium_JsnTyped-32      	 5888064	       209.6 ns/op	1531.37 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Large_JsnTyped-32       	   25044	     47872 ns/op	1569.93 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Deep_JsnTyped-32        	 1537275	       781.5 ns/op	1068.48 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Document_JsnTyped-32    	   47883	     22904 ns/op	2671.53 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Map_JsnTyped-32         	  486601	      2722 ns/op	 654.36 MB/s	       0 B/op	       0 allocs/op
+PASS
+goos: windows
+goarch: amd64
+pkg: github.com/coalaura/jsn/bench
+cpu: AMD Ryzen 9 9950X3D 16-Core Processor
+BenchmarkEncode_AllTypes_JsnTyped-32    	 6783692	       173.2 ns/op	1321.84 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Small_JsnTyped-32       	16375522	        76.49 ns/op	1791.10 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Medium_JsnTyped-32      	 6171794	       207.4 ns/op	1547.79 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Large_JsnTyped-32       	   25046	     48081 ns/op	1563.09 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Deep_JsnTyped-32        	 1498044	       806.4 ns/op	1035.53 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Document_JsnTyped-32    	   50725	     22878 ns/op	2674.60 MB/s	       0 B/op	       0 allocs/op
+BenchmarkEncode_Map_JsnTyped-32         	  454820	      2672 ns/op	 666.54 MB/s	       0 B/op	       0 allocs/op
+PASS

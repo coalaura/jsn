@@ -2,9 +2,6 @@ package jsn_test
 
 import (
 	"encoding/json"
-	"encoding/json/jsontext"
-	json2 "encoding/json/v2"
-	"io"
 	"strconv"
 	"testing"
 	"time"
@@ -316,316 +313,85 @@ func (p *PtrByteMarshaler) MarshalJSON() ([]byte, error) {
 }
 
 func BenchmarkEncode_AllTypes_Std(b *testing.B) {
-	enc := json.NewEncoder(io.Discard)
-
-	for range 1000 {
-		_ = enc.Encode(allTypesData)
-	}
-
-	b.ReportAllocs()
-	b.ResetTimer()
-
-	for b.Loop() {
-		_ = enc.Encode(allTypesData)
-	}
+	benchmarkV1(b, allTypesData)
 }
 
 func BenchmarkEncode_AllTypes_Std2(b *testing.B) {
-	enc := jsontext.NewEncoder(io.Discard)
-
-	for range 1000 {
-		_ = json2.MarshalEncode(enc, allTypesData)
-	}
-
-	b.ReportAllocs()
-	b.ResetTimer()
-
-	for b.Loop() {
-		_ = json2.MarshalEncode(enc, allTypesData)
-	}
+	benchmarkV2(b, allTypesData)
 }
 
-func BenchmarkEncode_AllTypes_Jsn(b *testing.B) {
-	enc := jsn.NewEncoder(io.Discard)
-
-	for range 1000 {
-		_ = allTypesEnc.Encode(enc, allTypesData)
-	}
-
-	b.ReportAllocs()
-	b.ResetTimer()
-
-	for b.Loop() {
-		_ = allTypesEnc.Encode(enc, allTypesData)
-	}
+func BenchmarkEncode_AllTypes_JsnTyped(b *testing.B) {
+	benchmarkTyped(b, allTypesData, allTypesEnc)
 }
 
 func BenchmarkEncode_Small_Std(b *testing.B) {
-	enc := json.NewEncoder(io.Discard)
-
-	for range 1000 {
-		_ = enc.Encode(smallData)
-	}
-
-	b.ReportAllocs()
-	b.ResetTimer()
-
-	for b.Loop() {
-		_ = enc.Encode(smallData)
-	}
+	benchmarkV1(b, smallData)
 }
 
 func BenchmarkEncode_Small_Std2(b *testing.B) {
-	enc := jsontext.NewEncoder(io.Discard)
-
-	for range 1000 {
-		_ = json2.MarshalEncode(enc, smallData)
-	}
-
-	b.ReportAllocs()
-	b.ResetTimer()
-
-	for b.Loop() {
-		_ = json2.MarshalEncode(enc, smallData)
-	}
+	benchmarkV2(b, smallData)
 }
 
-func BenchmarkEncode_Small_Jsn(b *testing.B) {
-	enc := jsn.NewEncoder(io.Discard)
-
-	for range 1000 {
-		_ = smallEnc.Encode(enc, smallData)
-	}
-
-	b.ReportAllocs()
-	b.ResetTimer()
-
-	for b.Loop() {
-		_ = smallEnc.Encode(enc, smallData)
-	}
+func BenchmarkEncode_Small_JsnTyped(b *testing.B) {
+	benchmarkTyped(b, smallData, smallEnc)
 }
 
 func BenchmarkEncode_Medium_Std(b *testing.B) {
-	enc := json.NewEncoder(io.Discard)
-
-	for range 500 {
-		_ = enc.Encode(medData)
-	}
-
-	b.ReportAllocs()
-	b.ResetTimer()
-
-	for b.Loop() {
-		_ = enc.Encode(medData)
-	}
+	benchmarkV1(b, medData)
 }
 
 func BenchmarkEncode_Medium_Std2(b *testing.B) {
-	enc := jsontext.NewEncoder(io.Discard)
-
-	for range 500 {
-		_ = json2.MarshalEncode(enc, medData)
-	}
-
-	b.ReportAllocs()
-	b.ResetTimer()
-
-	for b.Loop() {
-		_ = json2.MarshalEncode(enc, medData)
-	}
+	benchmarkV2(b, medData)
 }
 
-func BenchmarkEncode_Medium_Jsn(b *testing.B) {
-	enc := jsn.NewEncoder(io.Discard)
-
-	for range 500 {
-		_ = medEnc.Encode(enc, medData)
-	}
-
-	b.ReportAllocs()
-	b.ResetTimer()
-
-	for b.Loop() {
-		_ = medEnc.Encode(enc, medData)
-	}
+func BenchmarkEncode_Medium_JsnTyped(b *testing.B) {
+	benchmarkTyped(b, medData, medEnc)
 }
 
 func BenchmarkEncode_Large_Std(b *testing.B) {
-	enc := json.NewEncoder(io.Discard)
-
-	for range 100 {
-		_ = enc.Encode(largeData)
-	}
-
-	b.ReportAllocs()
-	b.ResetTimer()
-
-	for b.Loop() {
-		_ = enc.Encode(largeData)
-	}
+	benchmarkV1(b, largeData)
 }
 
 func BenchmarkEncode_Large_Std2(b *testing.B) {
-	enc := jsontext.NewEncoder(io.Discard)
-
-	for range 100 {
-		_ = json2.MarshalEncode(enc, largeData)
-	}
-
-	b.ReportAllocs()
-	b.ResetTimer()
-
-	for b.Loop() {
-		_ = json2.MarshalEncode(enc, largeData)
-	}
+	benchmarkV2(b, largeData)
 }
 
-func BenchmarkEncode_Large_Jsn(b *testing.B) {
-	enc := jsn.NewEncoder(io.Discard)
-
-	for range 100 {
-		_ = largeEnc.Encode(enc, largeData)
-	}
-
-	b.ReportAllocs()
-	b.ResetTimer()
-
-	for b.Loop() {
-		_ = largeEnc.Encode(enc, largeData)
-	}
+func BenchmarkEncode_Large_JsnTyped(b *testing.B) {
+	benchmarkTyped(b, largeData, largeEnc)
 }
 
 func BenchmarkEncode_Deep_Std(b *testing.B) {
-	enc := json.NewEncoder(io.Discard)
-
-	for range 100 {
-		_ = enc.Encode(deepData)
-	}
-
-	b.ReportAllocs()
-	b.ResetTimer()
-
-	for b.Loop() {
-		_ = enc.Encode(deepData)
-	}
+	benchmarkV1(b, deepData)
 }
 
 func BenchmarkEncode_Deep_Std2(b *testing.B) {
-	enc := jsontext.NewEncoder(io.Discard)
-
-	for range 100 {
-		_ = json2.MarshalEncode(enc, deepData)
-	}
-
-	b.ReportAllocs()
-	b.ResetTimer()
-
-	for b.Loop() {
-		_ = json2.MarshalEncode(enc, deepData)
-	}
+	benchmarkV2(b, deepData)
 }
 
-func BenchmarkEncode_Deep_Jsn(b *testing.B) {
-	enc := jsn.NewEncoder(io.Discard)
-
-	for range 100 {
-		_ = deepEnc.Encode(enc, deepData)
-	}
-
-	b.ReportAllocs()
-	b.ResetTimer()
-
-	for b.Loop() {
-		_ = deepEnc.Encode(enc, deepData)
-	}
+func BenchmarkEncode_Deep_JsnTyped(b *testing.B) {
+	benchmarkTyped(b, deepData, deepEnc)
 }
 
 func BenchmarkEncode_Map_Std(b *testing.B) {
-	enc := json.NewEncoder(io.Discard)
-
-	for range 500 {
-		_ = enc.Encode(mapData)
-	}
-
-	b.ReportAllocs()
-	b.ResetTimer()
-
-	for b.Loop() {
-		_ = enc.Encode(mapData)
-	}
+	benchmarkV1(b, mapData)
 }
 
 func BenchmarkEncode_Map_Std2(b *testing.B) {
-	enc := jsontext.NewEncoder(io.Discard)
-
-	for range 500 {
-		_ = json2.MarshalEncode(enc, mapData)
-	}
-
-	b.ReportAllocs()
-	b.ResetTimer()
-
-	for b.Loop() {
-		_ = json2.MarshalEncode(enc, mapData)
-	}
+	benchmarkV2(b, mapData)
 }
 
 func BenchmarkEncode_Map_Jsn(b *testing.B) {
-	enc := jsn.NewEncoder(io.Discard)
-
-	for range 500 {
-		_ = enc.Encode(mapData)
-	}
-
-	b.ReportAllocs()
-	b.ResetTimer()
-
-	for b.Loop() {
-		_ = enc.Encode(mapData)
-	}
+	benchmarkDynamic(b, mapData)
 }
 
 func BenchmarkEncode_Document_Std(b *testing.B) {
-	enc := json.NewEncoder(io.Discard)
-
-	for range 100 {
-		_ = enc.Encode(docData)
-	}
-
-	b.ReportAllocs()
-	b.ResetTimer()
-
-	for b.Loop() {
-		_ = enc.Encode(docData)
-	}
+	benchmarkV1(b, docData)
 }
 
 func BenchmarkEncode_Document_Std2(b *testing.B) {
-	enc := jsontext.NewEncoder(io.Discard)
-
-	for range 100 {
-		_ = json2.MarshalEncode(enc, docData)
-	}
-
-	b.ReportAllocs()
-	b.ResetTimer()
-
-	for b.Loop() {
-		_ = json2.MarshalEncode(enc, docData)
-	}
+	benchmarkV2(b, docData)
 }
 
-func BenchmarkEncode_Document_Jsn(b *testing.B) {
-	enc := jsn.NewEncoder(io.Discard)
-
-	for range 100 {
-		_ = docEnc.Encode(enc, docData)
-	}
-
-	b.ReportAllocs()
-	b.ResetTimer()
-
-	for b.Loop() {
-		_ = docEnc.Encode(enc, docData)
-	}
+func BenchmarkEncode_Document_JsnTyped(b *testing.B) {
+	benchmarkTyped(b, docData, docEnc)
 }
