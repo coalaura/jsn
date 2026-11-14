@@ -15,18 +15,24 @@ concurrency:
 
 jobs:
   test:
-    name: Test (${{ matrix.directory }}, Go ${{ matrix.go }})
-    runs-on: ubuntu-latest
+    name: Test (${{ matrix.directory }}, Go ${{ matrix.go }}, ${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - go: '1.26'
             directory: .
-          - go: 'stable'
-            directory: .
+            runner: ubuntu-latest
           - go: '1.27'
             directory: bench
+            runner: ubuntu-latest
+          - go: '1.26'
+            directory: .
+            runner: ubuntu-24.04-arm
+          - go: '1.27'
+            directory: bench
+            runner: ubuntu-24.04-arm
     env:
       GOTOOLCHAIN: local
     defaults:
