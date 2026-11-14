@@ -1,6 +1,7 @@
 package jsn
 
 import (
+	"encoding"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -10,9 +11,9 @@ import (
 	"reflect"
 	"runtime"
 	"strconv"
-	"strings"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 	"unsafe"
 )
 
@@ -62,7 +63,8 @@ type Encoder struct {
 	wr             io.Writer
 	flushThreshold int
 
-	// scratch holds pointer-shaped interface words during encodeAny.
+	// scratch holds direct-interface words during encodeAny, including
+	// single-field structs and single-element arrays of direct values.
 	// Re-entrant safe: the outer call dereferences &scratch before any
 	// nested call can overwrite it. scratch is reused across re-entrant
 	// encodeAny calls. Pointer-shaped encoders MUST dereference ptr
@@ -72,9 +74,9 @@ type Encoder struct {
 }
 
 // TypedEncoder is a pre-compiled encoder bound to T at the type level.
-// Encode takes *T directly, so no interface boxing, dynamic type check,
-// or per-call heap escape can occur. It is safe for concurrent use by
-// multiple Encoders.
+// Encode takes *T directly, avoiding interface boxing and dynamic type
+// checks. For zero allocations, reuse heap-resident values. It is safe
+// for concurrent use by multiple Encoders.
 type TypedEncoder[T any] struct {
 	enc encoderFunc
 }
@@ -102,17 +104,13 @@ type tapeEncoder struct {
 
 type structField struct {
 	nameBytes []byte
+	parents   []uintptr
 	enc       encoderFunc
 	offset    uintptr
 	isEmpty   isEmptyFunc
 	omit      bool
 	indirect  bool
 	op        uint8
-}
-
-type fieldCheck struct {
-	offset uintptr
-	check  isEmptyFunc
 }
 
 // eface mirrors the runtime's two-word interface layout.
@@ -137,57 +135,28 @@ type cacheMap struct {
 	m atomic.Pointer[map[uintptr]*cachedEncoder]
 }
 
-var ErrTimeOutOfRange = errors.New("jsn: time.Time year outside of range [0,9999]")
+var (
+	ErrTimeOutOfRange     = errors.New("jsn: time.Time year outside of range [0,9999]")
+	ErrTimeZoneOutOfRange = errors.New("jsn: time.Time timezone hour outside of range [0,23]")
+)
 
-// safeSet maps each byte to 1 if it needs no JSON escaping, 0 otherwise.
-var safeSet = [256]byte{
-	// 0x00-0x0F
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-	// 0x10-0x1F
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-	// 0x20-0x2F
-	1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-	// 0x30-0x3F
-	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1,
-	// 0x40-0x4F
-	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-	// 0x50-0x5F
-	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1,
-	// 0x60-0x6F
-	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-	// 0x70-0x7F
-	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-	// 0x80-0x8F
-	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-	// 0x90-0x9F
-	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-	// 0xA0-0xAF
-	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-	// 0xB0-0xBF
-	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-	// 0xC0-0xCF
-	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-	// 0xD0-0xDF
-	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-	// 0xE0-0xEF
-	1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-	// 0xF0-0xFF
-	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-}
+// safeSet marks ASCII bytes that need neither escaping nor UTF-8 validation.
+var safeSet [256]byte
 
 var (
 	cache cacheMap
 
 	timeType            = reflect.TypeFor[time.Time]()
 	isZeroerType        = reflect.TypeFor[isZeroer]()
-	byteSliceType       = reflect.TypeFor[[]byte]()
 	rawMessageType      = reflect.TypeFor[json.RawMessage]()
 	writerMarshalerType = reflect.TypeFor[WriterMarshaler]()
 	byteMarshalerType   = reflect.TypeFor[ByteMarshaler]()
+	textMarshalerType   = reflect.TypeFor[encoding.TextMarshaler]()
+	numberType          = reflect.TypeFor[json.Number]()
 )
 
 func init() {
-	for i := 0x20; i < 256; i++ {
+	for i := 0x20; i < utf8.RuneSelf; i++ {
 		safeSet[i] = 1
 	}
 
@@ -196,8 +165,6 @@ func init() {
 	safeSet['<'] = 0
 	safeSet['>'] = 0
 	safeSet['&'] = 0
-	// U+2028 and U+2029 start with 0xE2
-	safeSet[0xE2] = 0
 }
 
 // CompileTyped builds and caches an encoder for T. Use this on hot paths
@@ -274,6 +241,8 @@ func (te *TypedEncoder[T]) Encode(e *Encoder, v *T) error {
 	}
 
 	b, err := te.enc(e, e.buf[:0], unsafe.Pointer(v))
+	e.scratch = nil
+
 	if err != nil {
 		e.buf = b
 
@@ -297,6 +266,8 @@ func (e *Encoder) Encode(val any) error {
 	var err error
 
 	b, err = e.encodeAny(b, val)
+	e.scratch = nil
+
 	if err != nil {
 		e.buf = b
 
@@ -378,7 +349,7 @@ func getEncoder(tp reflect.Type) *cachedEncoder {
 
 	ce = &cachedEncoder{
 		enc:   enc,
-		isPtr: isPointerShaped(tp.Kind()),
+		isPtr: isDirectInterface(tp),
 	}
 
 	actual, _ := cache.loadOrStore(key, ce)
@@ -399,24 +370,17 @@ func (e *Encoder) encodeAny(b []byte, val any) ([]byte, error) {
 
 	var ptr unsafe.Pointer
 
-	var rv reflect.Value
-
 	if ce.isPtr {
 		e.scratch = ef.word
 
 		ptr = unsafe.Pointer(&e.scratch)
-	} else if ef.word == nil {
-		// runtime may store a nil word for zero-value non-pointer types
-		rv = reflect.New(reflect.TypeOf(val))
-
-		ptr = unsafe.Pointer(rv.Pointer())
 	} else {
 		ptr = ef.word
 	}
 
 	b, err := ce.enc(e, b, ptr)
 
-	runtime.KeepAlive(rv)
+	runtime.KeepAlive(val)
 
 	return b, err
 }
@@ -495,14 +459,13 @@ func (te *tapeEncoder) encode(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byt
 
 			b = appendFloat64(b, f64)
 		case opTime:
-			var tbuf [35]byte
+			var err error
 
-			n, err := formatTime(&tbuf, (*time.Time)(fieldPtr))
+			b, err = appendTime(b, (*time.Time)(fieldPtr))
 			if err != nil {
 				return b, err
 			}
 
-			b = append(b, tbuf[:n]...)
 		default:
 			var err error
 
@@ -532,7 +495,33 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 	visiting[tp] = pEnc
 
 	typPtr := extractTypePtr(tp)
-	isPtr := isPointerShaped(tp.Kind())
+	isDirect := isDirectInterface(tp)
+	isPointer := tp.Kind() == reflect.Pointer
+
+	// Interface values must be unpacked before checking concrete receiver methods.
+	if tp.Kind() == reflect.Interface {
+		enc := func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
+			return enc.encodeAny(b, *(*any)(ptr))
+		}
+
+		if tp.NumMethod() != 0 {
+			enc = func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
+				value := reflect.NewAt(tp, ptr).Elem().Interface()
+
+				return enc.encodeAny(b, value)
+			}
+		}
+
+		*pEnc = enc
+
+		return enc
+	}
+
+	if tp == numberType {
+		*pEnc = encodeNumber
+
+		return encodeNumber
+	}
 
 	if tp == rawMessageType {
 		enc := func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
@@ -549,8 +538,9 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 		return enc
 	}
 
-	// fast path for []byte -> Base64
-	if tp == byteSliceType {
+	// Named byte slices share the base64 path unless a marshaler overrides it.
+	isByteSlice := tp.Kind() == reflect.Slice && tp.Elem().Kind() == reflect.Uint8
+	if isByteSlice && !implementsAnyMarshaler(tp) && !implementsAnyMarshaler(tp.Elem()) {
 		enc := func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
 			s := *(*[]byte)(ptr)
 			if s == nil {
@@ -572,14 +562,7 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 	// bypass time.Time allocations
 	if tp == timeType {
 		enc := func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
-			var tbuf [35]byte
-
-			n, err := formatTime(&tbuf, (*time.Time)(ptr))
-			if err != nil {
-				return b, err
-			}
-
-			return append(b, tbuf[:n]...), nil
+			return appendTime(b, (*time.Time)(ptr))
 		}
 
 		*pEnc = enc
@@ -592,23 +575,26 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 
 	if tp.Implements(writerMarshalerType) || ptrTp.Implements(writerMarshalerType) {
 		recvTypPtr := typPtr
+		indirectReceiver := isDirect
 
 		if !tp.Implements(writerMarshalerType) {
 			recvTypPtr = ptrTypPtr
+			indirectReceiver = false
 		}
 
 		enc := func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
+			if isPointer && *(*unsafe.Pointer)(ptr) == nil {
+				return append(b, "null"...), nil
+			}
+
 			var val any
 
 			ef := (*eface)(unsafe.Pointer(&val))
 
 			ef.typ = recvTypPtr
 
-			if isPtr {
+			if indirectReceiver {
 				ef.word = *(*unsafe.Pointer)(ptr)
-				if ef.word == nil {
-					return append(b, "null"...), nil
-				}
 			} else {
 				ef.word = ptr
 			}
@@ -627,23 +613,26 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 
 	if tp.Implements(byteMarshalerType) || ptrTp.Implements(byteMarshalerType) {
 		recvTypPtr := typPtr
+		indirectReceiver := isDirect
 
 		if !tp.Implements(byteMarshalerType) {
 			recvTypPtr = ptrTypPtr
+			indirectReceiver = false
 		}
 
 		enc := func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
+			if isPointer && *(*unsafe.Pointer)(ptr) == nil {
+				return append(b, "null"...), nil
+			}
+
 			var val any
 
 			ef := (*eface)(unsafe.Pointer(&val))
 
 			ef.typ = recvTypPtr
 
-			if isPtr {
+			if indirectReceiver {
 				ef.word = *(*unsafe.Pointer)(ptr)
-				if ef.word == nil {
-					return append(b, "null"...), nil
-				}
 			} else {
 				ef.word = ptr
 			}
@@ -654,6 +643,44 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 			}
 
 			return b, err
+		}
+
+		*pEnc = enc
+
+		return enc
+	}
+
+	if tp.Implements(textMarshalerType) || ptrTp.Implements(textMarshalerType) {
+		recvTypPtr := typPtr
+		indirectReceiver := isDirect
+
+		if !tp.Implements(textMarshalerType) {
+			recvTypPtr = ptrTypPtr
+			indirectReceiver = false
+		}
+
+		enc := func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
+			if isPointer && *(*unsafe.Pointer)(ptr) == nil {
+				return append(b, "null"...), nil
+			}
+
+			var val any
+
+			ef := (*eface)(unsafe.Pointer(&val))
+			ef.typ = recvTypPtr
+
+			if indirectReceiver {
+				ef.word = *(*unsafe.Pointer)(ptr)
+			} else {
+				ef.word = ptr
+			}
+
+			text, err := val.(encoding.TextMarshaler).MarshalText()
+			if err != nil {
+				return b, err
+			}
+
+			return writeString(b, string(text)), nil
 		}
 
 		*pEnc = enc
@@ -688,7 +715,7 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 		enc = func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
 			return appendInt64Fast(b, *(*int64)(ptr)), nil
 		}
-	case reflect.Uint:
+	case reflect.Uint, reflect.Uintptr:
 		enc = func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
 			return appendUint64Fast(b, uint64(*(*uint)(ptr))), nil
 		}
@@ -993,7 +1020,23 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 			return append(b, ']'), nil
 		}
 	case reflect.Map:
-		if tp.Key().Kind() == reflect.String {
+		keyKind := tp.Key().Kind()
+
+		validKey := keyKind == reflect.String || keyKind >= reflect.Int && keyKind <= reflect.Int64 || keyKind >= reflect.Uint && keyKind <= reflect.Uintptr || tp.Key().Implements(textMarshalerType)
+		if !validKey {
+			enc = unsupportedEncoder(tp)
+
+			break
+		}
+
+		valueType := tp.Elem()
+		simpleValue := !implementsAnyMarshaler(valueType) && valueType != numberType
+
+		if valueType.Kind() == reflect.Interface && valueType.NumMethod() != 0 {
+			simpleValue = false
+		}
+
+		if keyKind == reflect.String && simpleValue {
 			switch tp.Elem().Kind() {
 			case reflect.String:
 				enc = func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
@@ -1264,8 +1307,6 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 			}
 		}
 
-		isStrKey := tp.Key().Kind() == reflect.String
-
 		enc = func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
 			rv := reflect.NewAt(tp, ptr).Elem()
 			if rv.IsNil() {
@@ -1285,24 +1326,14 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 
 				first = false
 
-				if isStrKey {
-					b = writeString(b, iter.Key().String())
-				} else {
-					b = append(b, '"')
+				var err error
 
-					var err error
-
-					b, err = enc.encodeAny(b, iter.Key().Interface())
-					if err != nil {
-						return b, err
-					}
-
-					b = append(b, '"')
+				b, err = appendMapKey(b, iter.Key())
+				if err != nil {
+					return b, err
 				}
 
 				b = append(b, ':')
-
-				var err error
 
 				b, err = enc.encodeAny(b, iter.Value().Interface())
 				if err != nil {
@@ -1347,16 +1378,8 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 
 			return elemEnc(enc, b, ptrptr)
 		}
-	case reflect.Interface:
-		enc = func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
-			v := *(*any)(ptr)
-
-			return enc.encodeAny(b, v)
-		}
 	default:
-		enc = func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
-			return append(b, "null"...), nil
-		}
+		enc = unsupportedEncoder(tp)
 	}
 
 	*pEnc = enc
@@ -1364,45 +1387,42 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 	return enc
 }
 
-func collectStructFields(tp reflect.Type, base uintptr, fields *[]structField, visiting map[reflect.Type]*encoderFunc) {
-	for sf := range tp.Fields() {
-		if !sf.IsExported() {
-			continue
-		}
+func collectStructFields(tp reflect.Type, fields *[]structField, visiting map[reflect.Type]*encoderFunc) {
+	resolved := resolveStructFields(tp)
 
-		tag := sf.Tag.Get("json")
-		if tag == "-" {
-			continue
-		}
+	for index := range resolved {
+		sf := &resolved[index]
 
-		name, opts, _ := strings.Cut(tag, ",")
-
-		// promote fields from embedded structs
-		if sf.Anonymous && name == "" && opts == "" && sf.Type.Kind() == reflect.Struct && !implementsAnyMarshaler(sf.Type) {
-			collectStructFields(sf.Type, base+sf.Offset, fields, visiting)
-
-			continue
-		}
-
-		if name == "" {
-			name = sf.Name
-		}
+		nameBytes := make([]byte, 1, len(sf.name)+4)
+		nameBytes[0] = ','
+		nameBytes = writeString(nameBytes, sf.name)
+		nameBytes = append(nameBytes, ':')
 
 		field := structField{
-			nameBytes: []byte(`,"` + name + `":`),
-			enc:       buildEncoder(sf.Type, visiting),
-			offset:    base + sf.Offset,
+			nameBytes: nameBytes,
+			parents:   sf.parents,
+			enc:       buildEncoder(sf.typ, visiting),
+			offset:    sf.offset,
 		}
 
-		field.op, field.indirect = fieldOp(sf.Type)
+		field.op, field.indirect = fieldOp(sf.typ)
 
-		omitEmpty := strings.Contains(opts, "omitempty")
-		omitZero := strings.Contains(opts, "omitzero")
+		if hasTagOption(sf.opts, "string") {
+			quoted := buildQuotedEncoder(sf.typ)
+			if quoted != nil {
+				field.enc = quoted
+				field.op = opEnc
+				field.indirect = false
+			}
+		}
+
+		omitEmpty := hasTagOption(sf.opts, "omitempty")
+		omitZero := hasTagOption(sf.opts, "omitzero")
 
 		switch {
 		case omitEmpty && omitZero:
-			isEmpty := buildIsEmptyFunc(sf.Type)
-			isZero := buildIsZeroFunc(sf.Type)
+			isEmpty := buildIsEmptyFunc(sf.typ)
+			isZero := buildIsZeroFunc(sf.typ)
 
 			field.omit = true
 
@@ -1411,10 +1431,10 @@ func collectStructFields(tp reflect.Type, base uintptr, fields *[]structField, v
 			}
 		case omitEmpty:
 			field.omit = true
-			field.isEmpty = buildIsEmptyFunc(sf.Type)
+			field.isEmpty = buildIsEmptyFunc(sf.typ)
 		case omitZero:
 			field.omit = true
-			field.isEmpty = buildIsZeroFunc(sf.Type)
+			field.isEmpty = buildIsZeroFunc(sf.typ)
 		}
 
 		*fields = append(*fields, field)
@@ -1424,7 +1444,7 @@ func collectStructFields(tp reflect.Type, base uintptr, fields *[]structField, v
 func buildStructEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encoderFunc {
 	var fields []structField
 
-	collectStructFields(tp, 0, &fields, visiting)
+	collectStructFields(tp, &fields, visiting)
 
 	return func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
 		b = append(b, '{')
@@ -1434,7 +1454,20 @@ func buildStructEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc)
 		for i := range fields {
 			field := &fields[i]
 
-			fieldPtr := unsafe.Add(ptr, field.offset)
+			fieldPtr := ptr
+
+			for _, offset := range field.parents {
+				fieldPtr = *(*unsafe.Pointer)(unsafe.Add(fieldPtr, offset))
+				if fieldPtr == nil {
+					break
+				}
+			}
+
+			if fieldPtr == nil {
+				continue
+			}
+
+			fieldPtr = unsafe.Add(fieldPtr, field.offset)
 
 			if field.omit && field.isEmpty(fieldPtr) {
 				continue
@@ -1483,27 +1516,12 @@ func isFlattenable(tp reflect.Type) bool {
 		return false
 	}
 
-	for sf := range tp.Fields() {
-		if !sf.IsExported() {
-			continue
-		}
+	fields := resolveStructFields(tp)
 
-		tag := sf.Tag.Get("json")
-		if tag == "-" {
-			continue
-		}
-
-		name, opts, _ := strings.Cut(tag, ",")
-		if strings.Contains(opts, "omitempty") || strings.Contains(opts, "omitzero") {
+	for index := range fields {
+		field := &fields[index]
+		if len(field.parents) != 0 || hasTagOption(field.opts, "omitempty") || hasTagOption(field.opts, "omitzero") || hasTagOption(field.opts, "string") {
 			return false
-		}
-
-		if sf.Anonymous && name == "" && opts == "" && sf.Type.Kind() == reflect.Struct && !implementsAnyMarshaler(sf.Type) {
-			if !isFlattenable(sf.Type) {
-				return false
-			}
-
-			continue
 		}
 	}
 
@@ -1520,28 +1538,10 @@ func buildTapeEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) *
 	)
 
 	walkFields = func(st reflect.Type, base uintptr) {
-		for sf := range st.Fields() {
-			if !sf.IsExported() {
-				continue
-			}
+		fields := resolveStructFields(st)
 
-			tag := sf.Tag.Get("json")
-			if tag == "-" {
-				continue
-			}
-
-			name, opts, _ := strings.Cut(tag, ",")
-
-			// promote fields from embedded structs
-			if sf.Anonymous && name == "" && opts == "" && sf.Type.Kind() == reflect.Struct && !implementsAnyMarshaler(sf.Type) {
-				walkFields(sf.Type, base+sf.Offset)
-
-				continue
-			}
-
-			if name == "" {
-				name = sf.Name
-			}
+		for index := range fields {
+			sf := &fields[index]
 
 			if !first {
 				pending = append(pending, ',')
@@ -1549,25 +1549,24 @@ func buildTapeEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) *
 
 			first = false
 
-			pending = append(pending, '"')
-			pending = append(pending, name...)
-			pending = append(pending, '"', ':')
+			pending = writeString(pending, sf.name)
+			pending = append(pending, ':')
 
-			op, indirect := fieldOp(sf.Type)
+			op, indirect := fieldOp(sf.typ)
 
-			if op == opEnc && !indirect && isFlattenable(sf.Type) {
-				walk(sf.Type, base+sf.Offset)
+			if op == opEnc && !indirect && isFlattenable(sf.typ) {
+				walk(sf.typ, base+sf.offset)
 
 				first = false
 
 				continue
 			}
 
-			if op == opEnc && !indirect && sf.Type.Kind() == reflect.Array && sf.Type.Len() <= 16 {
-				elemOp := scalarOp(sf.Type.Elem())
+			if op == opEnc && !indirect && sf.typ.Kind() == reflect.Array && sf.typ.Len() <= 16 && !implementsAnyMarshaler(sf.typ) {
+				elemOp := scalarOp(sf.typ.Elem())
 				if elemOp != opEnc {
-					elemSize := sf.Type.Elem().Size()
-					length := sf.Type.Len()
+					elemSize := sf.typ.Elem().Size()
+					length := sf.typ.Len()
 
 					pending = append(pending, '[')
 
@@ -1578,7 +1577,7 @@ func buildTapeEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) *
 
 						te.instrs = append(te.instrs, tapeInstr{
 							lit:    pending,
-							offset: base + sf.Offset + uintptr(i)*elemSize,
+							offset: base + sf.offset + uintptr(i)*elemSize,
 							op:     elemOp,
 						})
 
@@ -1593,13 +1592,13 @@ func buildTapeEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) *
 
 			ins := tapeInstr{
 				lit:      pending,
-				offset:   base + sf.Offset,
+				offset:   base + sf.offset,
 				op:       op,
 				indirect: indirect,
 			}
 
 			if op == opEnc {
-				ins.enc = buildEncoder(sf.Type, visiting)
+				ins.enc = buildEncoder(sf.typ, visiting)
 			}
 
 			te.instrs = append(te.instrs, ins)
@@ -1644,8 +1643,10 @@ func buildIsEmptyFunc(t reflect.Type) isEmptyFunc {
 			return reflect.NewAt(t, p).Elem().Len() == 0
 		}
 	case reflect.Array:
+		empty := t.Len() == 0
+
 		return func(p unsafe.Pointer) bool {
-			return reflect.NewAt(t, p).Elem().IsZero()
+			return empty
 		}
 	case reflect.Bool:
 		return func(p unsafe.Pointer) bool {
@@ -1671,7 +1672,7 @@ func buildIsEmptyFunc(t reflect.Type) isEmptyFunc {
 		return func(p unsafe.Pointer) bool {
 			return *(*int64)(p) == 0
 		}
-	case reflect.Uint:
+	case reflect.Uint, reflect.Uintptr:
 		return func(p unsafe.Pointer) bool {
 			return *(*uint)(p) == 0
 		}
@@ -1719,20 +1720,38 @@ func buildIsZeroFunc(t reflect.Type) isEmptyFunc {
 
 	if t.Implements(isZeroerType) {
 		typPtr := extractTypePtr(t)
-		isPtr := isPointerShaped(t.Kind())
+		isDirect := isDirectInterface(t)
+		isPointer := t.Kind() == reflect.Pointer
+
+		if t.Kind() == reflect.Interface {
+			return func(p unsafe.Pointer) bool {
+				value := reflect.NewAt(t, p).Elem()
+				if value.IsNil() {
+					return true
+				}
+
+				value = value.Elem()
+				if value.Kind() == reflect.Pointer && value.IsNil() {
+					return true
+				}
+
+				return value.Interface().(isZeroer).IsZero()
+			}
+		}
 
 		return func(p unsafe.Pointer) bool {
+			if isPointer && *(*unsafe.Pointer)(p) == nil {
+				return true
+			}
+
 			var val any
 
 			ef := (*eface)(unsafe.Pointer(&val))
 
 			ef.typ = typPtr
 
-			if isPtr {
+			if isDirect {
 				ef.word = *(*unsafe.Pointer)(p)
-				if ef.word == nil {
-					return true
-				}
 			} else {
 				ef.word = p
 			}
@@ -1762,9 +1781,7 @@ func buildIsZeroFunc(t reflect.Type) isEmptyFunc {
 		return func(p unsafe.Pointer) bool {
 			return *(*unsafe.Pointer)(p) == nil
 		}
-	case reflect.Struct:
-		return buildStructIsZero(t)
-	case reflect.Array, reflect.Complex64, reflect.Complex128:
+	case reflect.Struct, reflect.Array, reflect.Complex64, reflect.Complex128:
 		return func(p unsafe.Pointer) bool {
 			return reflect.NewAt(t, p).Elem().IsZero()
 		}
@@ -1774,50 +1791,18 @@ func buildIsZeroFunc(t reflect.Type) isEmptyFunc {
 	return buildIsEmptyFunc(t)
 }
 
-func buildStructIsZero(tp reflect.Type) isEmptyFunc {
-	var (
-		checks        []fieldCheck
-		hasUnexported bool
-	)
-
-	for sf := range tp.Fields() {
-		if !sf.IsExported() {
-			hasUnexported = true
-
-			continue
-		}
-
-		checks = append(checks, fieldCheck{
-			offset: sf.Offset,
-			check:  buildIsZeroFunc(sf.Type),
-		})
-	}
-
-	if hasUnexported {
-		return func(p unsafe.Pointer) bool {
-			return reflect.NewAt(tp, p).Elem().IsZero()
-		}
-	}
-
-	return func(p unsafe.Pointer) bool {
-		for _, c := range checks {
-			if !c.check(unsafe.Add(p, c.offset)) {
-				return false
-			}
-		}
-
-		return true
-	}
-}
-
 func extractTypePtr(typ reflect.Type) unsafe.Pointer {
 	return (*eface)(unsafe.Pointer(&typ)).word
 }
 
-func isPointerShaped(k reflect.Kind) bool {
-	switch k {
+func isDirectInterface(tp reflect.Type) bool {
+	switch tp.Kind() {
 	case reflect.Pointer, reflect.Map, reflect.Func, reflect.Chan, reflect.UnsafePointer:
 		return true
+	case reflect.Array:
+		return tp.Len() == 1 && isDirectInterface(tp.Elem())
+	case reflect.Struct:
+		return tp.NumField() == 1 && isDirectInterface(tp.Field(0).Type)
 	}
 
 	return false
@@ -1826,7 +1811,7 @@ func isPointerShaped(k reflect.Kind) bool {
 func implementsAnyMarshaler(t reflect.Type) bool {
 	pt := reflect.PointerTo(t)
 
-	return t.Implements(writerMarshalerType) || t.Implements(byteMarshalerType) || pt.Implements(writerMarshalerType) || pt.Implements(byteMarshalerType)
+	return t.Implements(writerMarshalerType) || t.Implements(byteMarshalerType) || t.Implements(textMarshalerType) || pt.Implements(writerMarshalerType) || pt.Implements(byteMarshalerType) || pt.Implements(textMarshalerType)
 }
 
 //go:noinline
@@ -1851,16 +1836,8 @@ func writeStringLong(b []byte, str string, safeEnd int) []byte {
 		i := pos + n
 		ch := str[i]
 
-		if ch == 0xE2 {
-			if i+2 < length && str[i+1] == 0x80 && (str[i+2] == 0xA8 || str[i+2] == 0xA9) {
-				b = append(b, '\\', 'u', '2', '0', '2', hexTable[str[i+2]&0xf])
-				pos = i + 3
-
-				continue
-			}
-
-			b = append(b, str[i])
-			pos = i + 1
+		if ch >= utf8.RuneSelf {
+			b, pos = appendStringRune(b, str, i)
 
 			continue
 		}
@@ -1874,6 +1851,10 @@ func writeStringLong(b []byte, str string, safeEnd int) []byte {
 			b = append(b, '\\', 'r')
 		case '\t':
 			b = append(b, '\\', 't')
+		case '\b':
+			b = append(b, '\\', 'b')
+		case '\f':
+			b = append(b, '\\', 'f')
 		default:
 			b = append(b, '\\', 'u', '0', '0', hexTable[ch>>4], hexTable[ch&0xf])
 		}
@@ -1907,10 +1888,6 @@ func writeString(b []byte, str string) []byte {
 
 	for ; safeEnd < inlineLimit; safeEnd++ {
 		if safeSet[str[safeEnd]] == 0 {
-			if str[safeEnd] == 0xE2 && (safeEnd+1 >= length || str[safeEnd+1] != 0x80) {
-				continue
-			}
-
 			break
 		}
 	}
@@ -1940,17 +1917,12 @@ func writeString(b []byte, str string) []byte {
 			continue
 		}
 
-		if ch == 0xE2 && i+2 < length && str[i+1] == 0x80 && (str[i+2] == 0xA8 || str[i+2] == 0xA9) {
+		if ch >= utf8.RuneSelf {
 			b = append(b, str[start:i]...)
-			b = append(b, '\\', 'u', '2', '0', '2', hexTable[str[i+2]&0xf])
+			b, start = appendStringRune(b, str, i)
 
-			i += 2
-			start = i + 1
+			i = start - 1
 
-			continue
-		}
-
-		if ch == 0xE2 {
 			continue
 		}
 
@@ -1965,6 +1937,10 @@ func writeString(b []byte, str string) []byte {
 			b = append(b, '\\', 'r')
 		case '\t':
 			b = append(b, '\\', 't')
+		case '\b':
+			b = append(b, '\\', 'b')
+		case '\f':
+			b = append(b, '\\', 'f')
 		default:
 			b = append(b, '\\', 'u', '0', '0', hexTable[ch>>4], hexTable[ch&0xf])
 		}
@@ -1979,13 +1955,28 @@ func writeString(b []byte, str string) []byte {
 	return append(b, '"')
 }
 
+func appendStringRune(b []byte, str string, index int) ([]byte, int) {
+	value, size := utf8.DecodeRuneInString(str[index:])
+
+	switch {
+	case value == utf8.RuneError && size == 1:
+		b = append(b, `\ufffd`...)
+	case value == '\u2028' || value == '\u2029':
+		b = append(b, '\\', 'u', '2', '0', '2', hexTable[value&0xf])
+	default:
+		b = append(b, str[index:index+size]...)
+	}
+
+	return b, index + size
+}
+
 func fieldOp(tp reflect.Type) (uint8, bool) {
 	op := scalarOp(tp)
 	if op != opEnc {
 		return op, false
 	}
 
-	if tp.Kind() == reflect.Pointer && !tp.Implements(writerMarshalerType) && !tp.Implements(byteMarshalerType) {
+	if tp.Kind() == reflect.Pointer && !implementsAnyMarshaler(tp) {
 		op = scalarOp(tp.Elem())
 		if op != opEnc {
 			return op, true
@@ -2043,15 +2034,7 @@ func appendScalar(b []byte, op uint8, ptr unsafe.Pointer) ([]byte, error) {
 
 		return appendFloat64(b, f), nil
 	case opTime:
-
-		var tbuf [35]byte
-
-		n, err := formatTime(&tbuf, (*time.Time)(ptr))
-		if err != nil {
-			return b, err
-		}
-
-		b = append(b, tbuf[:n]...)
+		return appendTime(b, (*time.Time)(ptr))
 	}
 
 	return b, nil
@@ -2105,16 +2088,21 @@ func appendFloat32(b []byte, f float32) []byte {
 	return b
 }
 
-func formatTime(buf *[35]byte, t *time.Time) (int, error) {
+func appendTime(b []byte, t *time.Time) ([]byte, error) {
 	year := t.Year()
 	if year < 0 || year >= 10000 {
-		return 0, ErrTimeOutOfRange
+		return b, ErrTimeOutOfRange
 	}
 
-	buf[0] = '"'
-	b := t.AppendFormat(buf[:1:35], time.RFC3339Nano)
+	_, offset := t.Zone()
+	if offset/3600 <= -24 || offset/3600 >= 24 {
+		return b, ErrTimeZoneOutOfRange
+	}
+
 	b = append(b, '"')
-	return len(b), nil
+	b = t.AppendFormat(b, time.RFC3339Nano)
+
+	return append(b, '"'), nil
 }
 
 func scalarOp(tp reflect.Type) uint8 {
@@ -2122,7 +2110,7 @@ func scalarOp(tp reflect.Type) uint8 {
 		return opTime
 	}
 
-	if tp == byteSliceType || tp == rawMessageType || implementsAnyMarshaler(tp) {
+	if tp == rawMessageType || tp == numberType || implementsAnyMarshaler(tp) {
 		return opEnc
 	}
 
@@ -2141,7 +2129,7 @@ func scalarOp(tp reflect.Type) uint8 {
 		return opInt32
 	case reflect.Int64:
 		return opInt64
-	case reflect.Uint:
+	case reflect.Uint, reflect.Uintptr:
 		return opUint
 	case reflect.Uint8:
 		return opUint8

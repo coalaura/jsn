@@ -21,7 +21,7 @@ GLOBL ·escape_consts(SB), NOPTR, $128
 // func simdFirstEscape(s string) int
 //
 // Returns the index of the first byte requiring JSON escaping
-// (per safeSet: ", \, <, >, &, 0xE2, control <= 0x1F), or len(s).
+// (per safeSet: ", \, <, >, &, non-ASCII, control <= 0x1F), or len(s).
 TEXT ·simdFirstEscape(SB), NOSPLIT, $0-24
 	MOVQ s_base+0(FP), SI
 	MOVQ s_len+8(FP), CX
@@ -37,8 +37,6 @@ TEXT ·simdFirstEscape(SB), NOSPLIT, $0-24
 	MOVOU ·escape_consts+32(SB), X3  // <
 	MOVOU ·escape_consts+48(SB), X4  // >
 	MOVOU ·escape_consts+64(SB), X5  // &
-	MOVOU ·escape_consts+80(SB), X6  // 0xE2
-	MOVOU ·escape_consts+96(SB), X10 // 0x80
 	MOVOU ·escape_consts+112(SB), X7 // 0x1F
 
 chunkloop:
@@ -63,14 +61,7 @@ chunkloop:
 	MOVO  X0, X9
 	PCMPEQB X5, X9          // &
 	POR   X9, X8
-	// only stop at 0xE2 when followed by 0x80
-	MOVO  X0, X9
-	PCMPEQB X6, X9          // X9 = mask of 0xE2 positions
-	MOVO  X0, X11
-	PSRLDQ $1, X11          // X11[i] = X0[i+1], X11[15] = 0
-	PCMPEQB X10, X11        // X11 = mask of 0x80 at offset+1
-	PAND  X9, X11           // X11 = 0xE2 followed by 0x80
-	POR   X11, X8
+	POR   X0, X8            // high bits stop at non-ASCII for UTF-8 validation
 
 	// control chars (byte <= 0x1F): sat(byte - 0x1F) is 0 exactly when
 	// byte <= 0x1F, so PCMPEQB against zero yields the mask.
@@ -83,20 +74,9 @@ chunkloop:
 	TESTL DX, DX
 	JNZ  found
 
-	// if last byte is 0xE2, back up so next chunk can check
-	MOVBQZX 15(SI), R8
-	CMPB R8, $0xE2
-	JE   last_is_e2
-
 	ADDQ $16, SI
 	SUBQ $16, CX
 	ADDQ $16, AX
-	JMP  chunkloop
-
-last_is_e2:
-	ADDQ $15, SI
-	SUBQ $15, CX
-	ADDQ $15, AX
 	JMP  chunkloop
 
 found:
@@ -109,8 +89,8 @@ byteloop:
 	TESTQ CX, CX
 	JLE  done
 	MOVBQZX (SI), DX
-	CMPB DX, $0xE2
-	JE   check_e2
+	CMPB DX, $0x80
+	JAE  foundb
 	CMPB DX, $0x22
 	JE   foundb
 	CMPB DX, $0x5C
@@ -128,18 +108,6 @@ byteloop:
 	INCQ AX
 	JMP  byteloop
 
-	// 0xE2 only flags an escape when followed by 0x80
-check_e2:
-	CMPQ CX, $2
-	JL   skip_e2
-	CMPB 1(SI), $0x80
-	JE   foundb
-skip_e2:
-	INCQ SI
-	DECQ CX
-	INCQ AX
-	JMP  byteloop
-
 foundb:
 	MOVQ AX, ret+16(FP)
 	RET
@@ -150,13 +118,12 @@ done:
 
 // func simdCopySafe(dst []byte, src string) int
 //
-// Fused scan + copy: loads 16 source bytes into X0, classifies them// with the same PCMPEQB chain as simdFirstEscape, and stores them to
+// Fused scan + copy: loads 16 source bytes into X0, classifies them
+// with the same PCMPEQB chain as simdFirstEscape, and stores them to
 // dst in the same iteration. When an escape is found mid-chunk, the
 // full 16 bytes are stored (the extras land in spare capacity and are
 // excluded by the caller's slice-length bookkeeping), and the escape
-// index is returned. When the last byte of a chunk is 0xE2, only 15
-// bytes are committed so the next chunk can re-examine the 0xE2 with
-// its lookahead partner.
+// index is returned. Non-ASCII bytes are validated by the Go caller.
 //
 // Frame: $0-48
 //   dst_base+0(FP), dst_len+8(FP), dst_cap+16(FP)
@@ -178,8 +145,6 @@ TEXT ·simdCopySafe(SB), NOSPLIT, $0-48
 	MOVOU ·escape_consts+32(SB), X3
 	MOVOU ·escape_consts+48(SB), X4
 	MOVOU ·escape_consts+64(SB), X5
-	MOVOU ·escape_consts+80(SB), X6
-	MOVOU ·escape_consts+96(SB), X10
 	MOVOU ·escape_consts+112(SB), X7
 
 cs_chunkloop:
@@ -205,13 +170,7 @@ cs_chunkloop:
 	PCMPEQB X5, X9
 	POR   X9, X8
 
-	MOVO  X0, X9
-	PCMPEQB X6, X9
-	MOVO  X0, X11
-	PSRLDQ $1, X11
-	PCMPEQB X10, X11
-	PAND  X9, X11
-	POR   X11, X8
+	POR   X0, X8
 
 	MOVO  X0, X9
 	PSUBUSB X7, X9
@@ -222,23 +181,11 @@ cs_chunkloop:
 	TESTL DX, DX
 	JNZ  cs_found_escape
 
-	MOVBQZX 15(SI), R8
-	CMPB   R8, $0xE2
-	JE     cs_last_is_e2
-
 	MOVOU  X0, (DI)
 	ADDQ   $16, SI
 	ADDQ   $16, DI
 	SUBQ   $16, CX
 	ADDQ   $16, AX
-	JMP    cs_chunkloop
-
-cs_last_is_e2:
-	MOVOU  X0, (DI)
-	ADDQ   $15, SI
-	ADDQ   $15, DI
-	SUBQ   $15, CX
-	ADDQ   $15, AX
 	JMP    cs_chunkloop
 
 cs_found_escape:
@@ -252,8 +199,8 @@ cs_byteloop:
 	TESTQ CX, CX
 	JLE   cs_done
 	MOVBQZX (SI), DX
-	CMPB  DX, $0xE2
-	JE    cs_check_e2
+	CMPB  DX, $0x80
+	JAE   cs_escape
 	CMPB  DX, $0x22
 	JE    cs_escape
 	CMPB  DX, $0x5C
@@ -266,19 +213,6 @@ cs_byteloop:
 	JE    cs_escape
 	CMPB  DX, $0x1F
 	JBE   cs_escape
-	MOVB  DX, (DI)
-	INCQ  SI
-	INCQ  DI
-	DECQ  CX
-	INCQ  AX
-	JMP   cs_byteloop
-
-cs_check_e2:
-	CMPQ  CX, $2
-	JL    cs_safe_e2
-	CMPB  1(SI), $0x80
-	JE    cs_escape
-cs_safe_e2:
 	MOVB  DX, (DI)
 	INCQ  SI
 	INCQ  DI

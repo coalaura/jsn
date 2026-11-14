@@ -5,7 +5,7 @@ import "testing"
 func TestSafeSet(t *testing.T) {
 	var want [256]byte
 
-	for i := 0x20; i < 256; i++ {
+	for i := 0x20; i < 128; i++ {
 		want[i] = 1
 	}
 
@@ -14,7 +14,6 @@ func TestSafeSet(t *testing.T) {
 	want['<'] = 0
 	want['>'] = 0
 	want['&'] = 0
-	want[0xE2] = 0
 
 	if safeSet == want {
 		return
