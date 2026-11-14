@@ -10,13 +10,9 @@ DATA ·escape_consts+48(SB)/8,  $0x3E3E3E3E3E3E3E3E  // >
 DATA ·escape_consts+56(SB)/8,  $0x3E3E3E3E3E3E3E3E
 DATA ·escape_consts+64(SB)/8,  $0x2626262626262626  // &
 DATA ·escape_consts+72(SB)/8,  $0x2626262626262626
-DATA ·escape_consts+80(SB)/8,  $0xE2E2E2E2E2E2E2E2  // 0xE2 (U+2028/2029 lead)
-DATA ·escape_consts+88(SB)/8,  $0xE2E2E2E2E2E2E2E2
-DATA ·escape_consts+96(SB)/8,  $0x8080808080808080  // 0x80 (U+2028/2029 second byte)
-DATA ·escape_consts+104(SB)/8, $0x8080808080808080
-DATA ·escape_consts+112(SB)/8, $0x1F1F1F1F1F1F1F1F  // control threshold
-DATA ·escape_consts+120(SB)/8, $0x1F1F1F1F1F1F1F1F
-GLOBL ·escape_consts(SB), NOPTR, $128
+DATA ·escape_consts+80(SB)/8,  $0x2020202020202020  // signed control/non-ASCII threshold
+DATA ·escape_consts+88(SB)/8,  $0x2020202020202020
+GLOBL ·escape_consts(SB), NOPTR, $96
 
 // func simdFirstEscape(s string) int
 //
@@ -30,21 +26,21 @@ TEXT ·simdFirstEscape(SB), NOSPLIT, $0-24
 	CMPQ CX, $16
 	JL  byteloop
 
-	PXOR X13, X13            // zero register (held throughout loop)
-
 	MOVOU ·escape_consts+0(SB), X1   // "
 	MOVOU ·escape_consts+16(SB), X2  // backslash
 	MOVOU ·escape_consts+32(SB), X3  // <
 	MOVOU ·escape_consts+48(SB), X4  // >
 	MOVOU ·escape_consts+64(SB), X5  // &
-	MOVOU ·escape_consts+112(SB), X7 // 0x1F
+	MOVOU ·escape_consts+80(SB), X7 // 0x20
 
 chunkloop:
 	CMPQ CX, $16
 	JL  byteloop
 
 	MOVOU (SI), X0           // load 16 bytes (unaligned)
-	PXOR X8, X8              // escape-bit accumulator
+	// Signed 0x20 > byte catches both controls and non-ASCII bytes.
+	MOVO X7, X8
+	PCMPGTB X0, X8
 
 	MOVO  X0, X9
 	PCMPEQB X1, X9          // "
@@ -60,14 +56,6 @@ chunkloop:
 	POR   X9, X8
 	MOVO  X0, X9
 	PCMPEQB X5, X9          // &
-	POR   X9, X8
-	POR   X0, X8            // high bits stop at non-ASCII for UTF-8 validation
-
-	// control chars (byte <= 0x1F): sat(byte - 0x1F) is 0 exactly when
-	// byte <= 0x1F, so PCMPEQB against zero yields the mask.
-	MOVO  X0, X9
-	PSUBUSB X7, X9          // X9 = sat(byte - 0x1F)
-	PCMPEQB X13, X9         // X9 = 0xFF where byte <= 0x1F
 	POR   X9, X8
 
 	PMOVMSKB X8, DX         // DX = high-bit mask (16 bits)
@@ -138,21 +126,20 @@ TEXT ·simdCopySafe(SB), NOSPLIT, $0-48
 	CMPQ  CX, $16
 	JL    cs_byteloop
 
-	PXOR  X13, X13
-
 	MOVOU ·escape_consts+0(SB), X1
 	MOVOU ·escape_consts+16(SB), X2
 	MOVOU ·escape_consts+32(SB), X3
 	MOVOU ·escape_consts+48(SB), X4
 	MOVOU ·escape_consts+64(SB), X5
-	MOVOU ·escape_consts+112(SB), X7
+	MOVOU ·escape_consts+80(SB), X7
 
 cs_chunkloop:
 	CMPQ  CX, $16
 	JL    cs_byteloop
 
 	MOVOU (SI), X0
-	PXOR  X8, X8
+	MOVO X7, X8
+	PCMPGTB X0, X8
 
 	MOVO  X0, X9
 	PCMPEQB X1, X9
@@ -168,13 +155,6 @@ cs_chunkloop:
 	POR   X9, X8
 	MOVO  X0, X9
 	PCMPEQB X5, X9
-	POR   X9, X8
-
-	POR   X0, X8
-
-	MOVO  X0, X9
-	PSUBUSB X7, X9
-	PCMPEQB X13, X9
 	POR   X9, X8
 
 	PMOVMSKB X8, DX

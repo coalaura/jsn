@@ -766,6 +766,11 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 			return append(b, "false"...), nil
 		}
 	case reflect.Slice:
+		enc = buildScalarCollection(tp)
+		if enc != nil {
+			break
+		}
+
 		if scalarOp(tp.Elem()) == opString {
 			enc = func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
 				s := *(*[]string)(ptr)
@@ -804,6 +809,14 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 		if isFlattenable(elemTp) {
 			te := buildTapeEncoder(elemTp, visiting)
 			elemSize := elemTp.Size()
+
+			fixed := buildFixedTape(te)
+			if fixed != nil {
+				enc = buildFixedSlice(fixed, elemSize)
+				*pEnc = enc
+
+				return enc
+			}
 
 			enc = func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
 				sh := (*sliceHeader)(ptr)
@@ -947,6 +960,11 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 			return append(b, ']'), nil
 		}
 	case reflect.Array:
+		enc = buildScalarCollection(tp)
+		if enc != nil {
+			break
+		}
+
 		op := scalarOp(tp.Elem())
 		if op != opEnc {
 			elemSize := tp.Elem().Size()
@@ -1311,7 +1329,12 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 		enc = buildMapEncoder(tp, visiting)
 	case reflect.Struct:
 		if isFlattenable(tp) {
-			enc = buildTapeEncoder(tp, visiting).encode
+			te := buildTapeEncoder(tp, visiting)
+
+			enc = buildFixedTape(te)
+			if enc == nil {
+				enc = te.encode
+			}
 		} else {
 			enc = buildStructEncoder(tp, visiting)
 		}
@@ -1794,33 +1817,71 @@ func writeStringLong(b []byte, str string, safeEnd int) []byte {
 			break
 		}
 
-		i := pos + n
-		ch := str[i]
+		pos += n
 
-		if ch >= utf8.RuneSelf {
-			b, pos = appendStringRune(b, str, i)
+		// Long safe spans usually contain isolated escapes; keep them on the
+		// SIMD path without probing the next span byte by byte.
+		if n >= 16 {
+			if str[pos] >= utf8.RuneSelf {
+				b, pos = appendStringRune(b, str, pos)
+			} else {
+				b = appendStringEscape(b, str[pos])
+				pos++
+			}
 
 			continue
 		}
 
-		switch ch {
-		case '\\', '"':
-			b = append(b, '\\', ch)
-		case '\n':
-			b = append(b, '\\', 'n')
-		case '\r':
-			b = append(b, '\\', 'r')
-		case '\t':
-			b = append(b, '\\', 't')
-		case '\b':
-			b = append(b, '\\', 'b')
-		case '\f':
-			b = append(b, '\\', 'f')
-		default:
-			b = append(b, '\\', 'u', '0', '0', hexTable[ch>>4], hexTable[ch&0xf])
+		start := pos
+		safeRun := 0
+
+		// Handle clusters in Go instead of reloading SIMD constants for every
+		// escape or UTF-8 rune. Return to SIMD after eight consecutive safe bytes.
+		for pos < length {
+			ch := str[pos]
+			if safeSet[ch] != 0 {
+				pos++
+
+				safeRun++
+				if safeRun == 8 {
+					break
+				}
+
+				continue
+			}
+
+			safeRun = 0
+
+			if ch >= utf8.RuneSelf {
+				value, size := utf8.DecodeRuneInString(str[pos:])
+				valid := value != utf8.RuneError || size != 1
+
+				if valid && value != '\u2028' && value != '\u2029' {
+					pos += size
+
+					continue
+				}
+
+				b = append(b, str[start:pos]...)
+
+				if !valid {
+					b = append(b, `\ufffd`...)
+				} else {
+					b = append(b, '\\', 'u', '2', '0', '2', hexTable[value&0xf])
+				}
+
+				pos += size
+			} else {
+				b = append(b, str[start:pos]...)
+				b = appendStringEscape(b, ch)
+
+				pos++
+			}
+
+			start = pos
 		}
 
-		pos = i + 1
+		b = append(b, str[start:pos]...)
 	}
 
 	return append(b, '"')
@@ -1929,6 +1990,25 @@ func appendStringRune(b []byte, str string, index int) ([]byte, int) {
 	}
 
 	return b, index + size
+}
+
+func appendStringEscape(b []byte, ch byte) []byte {
+	switch ch {
+	case '\\', '"':
+		return append(b, '\\', ch)
+	case '\n':
+		return append(b, '\\', 'n')
+	case '\r':
+		return append(b, '\\', 'r')
+	case '\t':
+		return append(b, '\\', 't')
+	case '\b':
+		return append(b, '\\', 'b')
+	case '\f':
+		return append(b, '\\', 'f')
+	default:
+		return append(b, '\\', 'u', '0', '0', hexTable[ch>>4], hexTable[ch&0xf])
+	}
 }
 
 func fieldOp(tp reflect.Type) (uint8, bool) {
