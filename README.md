@@ -60,13 +60,13 @@ Decoding follows `encoding/json` conventions for struct tags, case-insensitive f
 
 Unlike `encoding/json.Unmarshal`, complete-buffer decoding validates in a single pass, so malformed JSON can leave the destination partially populated and invoke custom unmarshaling before a later syntax error is found. Validate with `json.Valid` first if syntax-error atomicity is required.
 
-Run the decoder comparison from `bench/` with `go test -run '^$' -bench '^BenchmarkDecode$' -benchmem` on Go 1.27 or later. It compares standard v1, standard v2, dynamic jsn and typed jsn with both reused and fresh destinations, validating decoded values before and after timing.
-
 ## Notes
 
 - **Map key ordering is non-deterministic.** Unlike `encoding/json` which sorts map keys, `jsn` emits them in Go's runtime map iteration order. This is not a bug for 99% of use cases (JSON objects are unordered by spec), but byte-for-byte output comparison across runs will fail. If you need stable output, sort keys before encoding.
 
 ## Performance Benchmarks
+
+### Encoding
 
 Median time per encode, measured on 2026-11-14 with Go 1.27.4, Windows/amd64 (`GOAMD64=v1`, default `GOEXPERIMENT`) and an AMD Ryzen 9 9950X3D. Each cell contains 12 one-second samples from the same compiled benchmark binary, with library execution order rotated each round. Every sample performs 100 untimed warm-up encodes before measurement.
 
@@ -91,3 +91,32 @@ bash bench/bench.sh
 ```
 
 The runner tests the suite, rebuilds once and reruns every implementation without reusing old baselines. Override the sampling settings with `BENCH_COUNT=12 BENCH_TIME=1s`. [Raw samples and environment/source metadata](bench/results/) are retained alongside the [median, observed range and allocation tables](bench/benchstats.txt). Some samples have substantial timing variation; ranges are reported rather than discarded and are not confidence intervals. Results are specific to this machine and toolchain.
+
+### Decoding
+
+Median time per complete-buffer decode, measured on the same date, machine and toolchain as encoding. Each cell contains three 300 ms samples, with library execution order rotated each round and 100 untimed warm-up decodes before each sample. Standard v1 uses `encoding/json.Unmarshal`; standard v2 uses `encoding/json/v2.Unmarshal` with default options.
+
+| Payload | Destination | `encoding/json` | `encoding/json/v2` | jsn `Unmarshal` | jsn `TypedDecoder.Unmarshal` |
+| :--- | :--- | ---: | ---: | ---: | ---: |
+| AllTypes | Reused | 1.11 us | 1.14 us | 426.0 ns | 378.8 ns |
+| AllTypes | Fresh | 1.27 us | 1.03 us | 574.6 ns | 523.2 ns |
+| Small | Reused | 512.6 ns | 415.8 ns | 283.4 ns | 243.2 ns |
+| Small | Fresh | 618.9 ns | 503.7 ns | 330.8 ns | 287.9 ns |
+| Medium | Reused | 1.46 us | 1.43 us | 686.9 ns | 660.6 ns |
+| Medium | Fresh | 1.76 us | 1.49 us | 905.3 ns | 908.6 ns |
+| Large | Reused | 295.97 us | 334.15 us | 142.69 us | 145.38 us |
+| Large | Fresh | 382.35 us | 362.70 us | 209.40 us | 226.68 us |
+| Deep | Reused | 4.21 us | 4.07 us | 2.10 us | 2.15 us |
+| Deep | Fresh | 4.96 us | 4.32 us | 3.23 us | 3.20 us |
+| Map | Reused | 16.40 us | 32.16 us | 6.31 us | 6.33 us |
+| Map | Fresh | 19.93 us | 22.34 us | 12.45 us | 14.03 us |
+| Document | Reused | 126.09 us | 117.55 us | 77.90 us | 84.32 us |
+| Document | Fresh | 165.28 us | 141.90 us | 103.20 us | 105.52 us |
+
+Reused destinations retain their storage between iterations; fresh destinations are allocated inside each timed iteration. Both modes use warmed type plans and owned output strings. Decoding can allocate in either mode. Type compilation, input preparation and decoded-value validation are outside the timed loops; every implementation is validated before and after timing. These measurements exclude streaming and first-use costs.
+
+Run the decoder comparison from `bench/` with Go 1.27 or later:
+
+```bash
+go test -run '^$' -bench '^BenchmarkDecode$' -benchmem
+```
