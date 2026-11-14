@@ -52,7 +52,7 @@ Median time per encode, measured on 2026-11-14 with Go 1.27.4, Windows/amd64 (`G
 | Small | 211.45 ns | 200.05 ns | 90.83 ns | 75.31 ns |
 | Medium | 927.90 ns | 789.05 ns | 225.20 ns | 206.70 ns |
 | Large | 204.63 us | 175.62 us | 48.31 us | 48.06 us |
-| Deep | 2.36 us | 2.52 us | 992.55 ns | 778.80 ns |
+| Deep | 2.36 us | 2.52 us | 992.55 ns (0.99us) | 778.80 ns (0.78us) |
 | Map | 19.40 us | 8.02 us | 2.50 us | 2.64 us |
 | Document | 43.05 us | 43.80 us | 22.56 us | 22.36 us |
 
