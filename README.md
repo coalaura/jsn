@@ -1,6 +1,6 @@
 # jsn
 
-`jsn` is a high-performance, zero-allocation Go JSON encoder. It compiles type-level encoders (`TypedEncoder[T]`) to avoid runtime reflection and interface boxing overhead on hot paths.
+`jsn` is a high-performance Go JSON encoder and decoder. It compiles cached, type-specific plans to reduce runtime reflection and interface boxing on hot paths. The encoder supports zero-allocation steady-state operation; the decoder owns its output strings and allocates storage as needed.
 
 ## Installation
 
@@ -37,6 +37,30 @@ func main() {
 	}
 }
 ```
+
+### Decoding
+
+Use `jsn.Unmarshal(data, &value)` for complete JSON buffers or compile a typed decoder once for repeated use:
+
+```go
+var userDecoder = jsn.CompileTypedDecoder[User]()
+
+func decodeUser(data []byte) (User, error) {
+	var user User
+
+	err := userDecoder.Unmarshal(data, &user)
+
+	return user, err
+}
+```
+
+`jsn.NewDecoder(reader)` supports `Decode`, `UseNumber`, `DisallowUnknownFields`, `Buffered`, `InputOffset`, `More` and `Token`. Typed streaming uses `userDecoder.Decode(decoder, &user)`. Stream framing and tokens currently use `encoding/json.Decoder`; the compiled fast path targets complete-buffer decoding.
+
+Decoding follows `encoding/json` conventions for struct tags, case-insensitive field matching, duplicate keys, nulls, destination reuse and custom JSON/text unmarshaling. Errors and tokens use the standard library's types. Decoded strings, map keys and raw messages do not borrow the input buffer. Compiled plans are safe to share across goroutines with separate destinations; stream decoders are not.
+
+Unlike `encoding/json.Unmarshal`, complete-buffer decoding validates in a single pass, so malformed JSON can leave the destination partially populated and invoke custom unmarshaling before a later syntax error is found. Validate with `json.Valid` first if syntax-error atomicity is required.
+
+Run the decoder comparison from `bench/` with `go test -run '^$' -bench '^BenchmarkDecode$' -benchmem` on Go 1.27 or later. It compares standard v1, standard v2, dynamic jsn and typed jsn with both reused and fresh destinations, validating decoded values before and after timing.
 
 ## Notes
 
