@@ -63,6 +63,9 @@ Unlike `encoding/json.Unmarshal`, complete-buffer decoding validates in a single
 ## Notes
 
 - **Map key ordering is non-deterministic.** Unlike `encoding/json` which sorts map keys, `jsn` emits them in Go's runtime map iteration order. This is not a bug for 99% of use cases (JSON objects are unordered by spec), but byte-for-byte output comparison across runs will fail. If you need stable output, sort keys before encoding.
+- Standard JSON/text marshalers follow `encoding/json` v1 addressability rules: pointer-only methods are not called on unaddressable interface or map values. Typed encoding receives an addressable `*T`. The `WriterMarshaler` extension also supports pointer-only methods on unaddressable values, using independent writable copies that callbacks may retain. Pointer-only `IsZero` callbacks likewise receive writable storage.
+- `RawMessage` and `MarshalJSON` output is validated, compacted and HTML/JavaScript-escaped. `WriterMarshaler` is a trusted-output extension: it must emit exactly one valid JSON value, perform its own escaping and propagate writer errors. Its output is not validated, compacted or escaped; partial writes cannot be rolled back, and the supplied writer must not be retained.
+- The encoder's 4 KB flush threshold is checked at selected traversal points, not enforced as a maximum buffer size or write size. Large strings, byte slices and raw/custom JSON values are buffered whole; raw/custom JSON validation also uses scratch storage. Buffer capacity is retained for reuse. Encoding errors can leave partial output in the underlying writer; use a separate buffer when output must be withheld until success.
 
 ## Performance Benchmarks
 

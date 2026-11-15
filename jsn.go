@@ -38,10 +38,13 @@ const (
 	opTime
 )
 
-// WriterMarshaler is implemented by types that can marshal themselves
-// directly into an io.Writer, avoiding intermediate []byte allocations.
-// The encoder passes itself as the writer, so output is appended
-// straight into the internal buffer.
+// WriterMarshaler is a trusted-output extension for writing directly into
+// the encoder's buffer. Implementations must emit exactly one valid JSON
+// value and apply any required HTML and JavaScript escaping themselves:
+// the encoder neither validates, compacts nor escapes this output.
+// Implementations must propagate writer errors. Output may be flushed before
+// the callback returns; errors cannot roll back partial writes. The writer
+// must not be retained or used after the callback returns.
 type WriterMarshaler interface {
 	MarshalJSONTo(io.Writer) error
 }
@@ -54,23 +57,21 @@ type ByteMarshaler interface {
 	MarshalJSON() ([]byte, error)
 }
 
-// Encoder writes JSON values to an underlying io.Writer. It maintains an
-// internal buffer that is reused across Encode calls, so a single Encoder
-// produces zero allocations in steady state. An Encoder is not safe for
-// concurrent use.
+// Encoder writes JSON values to an underlying io.Writer. It maintains
+// internal buffers that retain their capacity across Encode calls. Common
+// paths produce zero allocations in steady state. An Encoder is not safe
+// for concurrent use.
 type Encoder struct {
 	buf            []byte
 	wr             io.Writer
 	flushThreshold int
 	mapScratch     map[reflect.Type]*mapScratchPool
 
-	// scratch holds direct-interface words during encodeAny, including
-	// single-field structs and single-element arrays of direct values.
-	// Re-entrant safe: the outer call dereferences &scratch before any
-	// nested call can overwrite it. scratch is reused across re-entrant
-	// encodeAny calls. Pointer-shaped encoders MUST dereference ptr
-	// (reading the inner pointer) before making any nested call that
-	// could trigger encodeAny.
+	active      map[encodeVisit]struct{}
+	jsonScratch []byte
+
+	// scratch is only used by read-only, direct-interface encoders. Values
+	// that can expose a mutable receiver get independently owned storage.
 	scratch unsafe.Pointer
 }
 
@@ -122,8 +123,22 @@ type eface struct {
 }
 
 type cachedEncoder struct {
-	enc   encoderFunc
-	isPtr bool
+	enc         encoderFunc
+	addressable encoderFunc
+	typ         reflect.Type
+	copyValue   bool
+	isPtr       bool
+}
+
+type encoderKey struct {
+	typ         reflect.Type
+	addressable bool
+}
+
+type encodeVisit struct {
+	typ    reflect.Type
+	ptr    unsafe.Pointer
+	length int
 }
 
 type sliceHeader struct {
@@ -173,12 +188,15 @@ func init() {
 // zero allocations, pass heap-resident values (v escapes into the
 // compiled encoder).
 func CompileTyped[T any]() *TypedEncoder[T] {
-	return &TypedEncoder[T]{enc: getEncoder(reflect.TypeFor[T]()).enc}
+	return &TypedEncoder[T]{enc: getEncoder(reflect.TypeFor[T]()).addressable}
 }
 
 // NewEncoder returns a new Encoder that writes JSON values to wr,
-// pre-allocating a 1KB internal buffer. The encoder streams to wr in
-// 4KB chunks; wrap wr in a bytes.Buffer if you need full buffering.
+// pre-allocating a 1KB internal buffer. The 4KB flush threshold is checked
+// at selected traversal points; it is not a maximum buffer or write size.
+// Large strings, byte slices and raw/custom JSON values are buffered whole,
+// and grown buffer capacity is retained. Wrap wr in a bytes.Buffer if you
+// need to withhold partial output until encoding succeeds.
 func NewEncoder(wr io.Writer) *Encoder {
 	return &Encoder{
 		wr:             wr,
@@ -282,17 +300,15 @@ func (e *Encoder) Encode(val any) error {
 
 // Write implements io.Writer by appending p to the internal buffer.
 // It exists so the Encoder can be passed to WriterMarshaler.MarshalJSONTo
-// and never returns an error.
+// and propagates underlying writer errors when the flush threshold is met.
 func (e *Encoder) Write(p []byte) (int, error) {
 	e.buf = append(e.buf, p...)
 
 	if len(e.buf) >= e.flushThreshold {
-		_, err := e.wr.Write(e.buf)
+		err := e.Flush()
 		if err != nil {
 			return 0, err
 		}
-
-		e.buf = e.buf[:0]
 	}
 
 	return len(p), nil
@@ -301,7 +317,10 @@ func (e *Encoder) Write(p []byte) (int, error) {
 // Flush writes any buffered data to the underlying writer.
 func (e *Encoder) Flush() error {
 	if len(e.buf) > 0 {
-		_, err := e.wr.Write(e.buf)
+		count, err := e.wr.Write(e.buf)
+		if err == nil && count != len(e.buf) {
+			err = io.ErrShortWrite
+		}
 
 		e.buf = e.buf[:0]
 
@@ -313,7 +332,11 @@ func (e *Encoder) Flush() error {
 
 func (e *Encoder) maybeFlush(b []byte) ([]byte, error) {
 	if len(b) >= e.flushThreshold {
-		_, err := e.wr.Write(b)
+		count, err := e.wr.Write(b)
+		if err == nil && count != len(b) {
+			err = io.ErrShortWrite
+		}
+
 		if err != nil {
 			return b, err
 		}
@@ -346,11 +369,16 @@ func getEncoder(tp reflect.Type) *cachedEncoder {
 		return ce
 	}
 
-	enc := buildEncoder(tp, make(map[reflect.Type]*encoderFunc))
+	visiting := make(map[encoderKey]*encoderFunc)
+	enc := buildEncoder(tp, visiting, false)
+	addressable := buildEncoder(tp, visiting, true)
 
 	ce = &cachedEncoder{
-		enc:   enc,
-		isPtr: isDirectInterface(tp),
+		enc:         enc,
+		addressable: addressable,
+		typ:         tp,
+		copyValue:   mapValueNeedsCopy(tp),
+		isPtr:       isDirectInterface(tp),
 	}
 
 	actual, _ := cache.loadOrStore(key, ce)
@@ -371,7 +399,13 @@ func (e *Encoder) encodeAny(b []byte, val any) ([]byte, error) {
 
 	var ptr unsafe.Pointer
 
-	if ce.isPtr {
+	if ce.copyValue {
+		// Interface data may be shared or read-only. The copy can be retained
+		// by pointer callbacks after this encoding and future encoder reuse.
+		value := reflect.New(ce.typ)
+		value.Elem().Set(reflect.ValueOf(val))
+		ptr = value.UnsafePointer()
+	} else if ce.isPtr {
 		e.scratch = ef.word
 
 		ptr = unsafe.Pointer(&e.scratch)
@@ -480,8 +514,9 @@ func (te *tapeEncoder) encode(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byt
 	return append(b, te.tail...), nil
 }
 
-func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encoderFunc {
-	if pEnc, ok := visiting[tp]; ok {
+func buildEncoder(tp reflect.Type, visiting map[encoderKey]*encoderFunc, addressable bool) (result encoderFunc) {
+	key := encoderKey{typ: tp, addressable: addressable}
+	if pEnc, ok := visiting[key]; ok {
 		enc := *pEnc
 		if enc != nil {
 			return enc
@@ -493,7 +528,12 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 	}
 
 	pEnc := new(encoderFunc)
-	visiting[tp] = pEnc
+	visiting[key] = pEnc
+
+	defer func() {
+		result = guardCycles(tp, result)
+		*pEnc = result
+	}()
 
 	typPtr := extractTypePtr(tp)
 	isDirect := isDirectInterface(tp)
@@ -531,28 +571,7 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 				return append(b, "null"...), nil
 			}
 
-			return append(b, s...), nil
-		}
-
-		*pEnc = enc
-
-		return enc
-	}
-
-	// Named byte slices share the base64 path unless a marshaler overrides it.
-	isByteSlice := tp.Kind() == reflect.Slice && tp.Elem().Kind() == reflect.Uint8
-	if isByteSlice && !implementsAnyMarshaler(tp) && !implementsAnyMarshaler(tp.Elem()) {
-		enc := func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
-			s := *(*[]byte)(ptr)
-			if s == nil {
-				return append(b, "null"...), nil
-			}
-
-			b = append(b, '"')
-			b = base64.StdEncoding.AppendEncode(b, s)
-			b = append(b, '"')
-
-			return b, nil
+			return enc.appendJSON(b, s, tp)
 		}
 
 		*pEnc = enc
@@ -612,7 +631,7 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 		return enc
 	}
 
-	if tp.Implements(byteMarshalerType) || ptrTp.Implements(byteMarshalerType) {
+	if tp.Implements(byteMarshalerType) || addressable && ptrTp.Implements(byteMarshalerType) {
 		recvTypPtr := typPtr
 		indirectReceiver := isDirect
 
@@ -639,11 +658,11 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 			}
 
 			out, err := val.(ByteMarshaler).MarshalJSON()
-			if err == nil {
-				b = append(b, out...)
+			if err != nil {
+				return b, &json.MarshalerError{Type: reflect.TypeOf(val), Err: err}
 			}
 
-			return b, err
+			return enc.appendJSON(b, out, reflect.TypeOf(val))
 		}
 
 		*pEnc = enc
@@ -651,7 +670,7 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 		return enc
 	}
 
-	if tp.Implements(textMarshalerType) || ptrTp.Implements(textMarshalerType) {
+	if tp.Implements(textMarshalerType) || addressable && ptrTp.Implements(textMarshalerType) {
 		recvTypPtr := typPtr
 		indirectReceiver := isDirect
 
@@ -678,10 +697,31 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 
 			text, err := val.(encoding.TextMarshaler).MarshalText()
 			if err != nil {
-				return b, err
+				return b, &json.MarshalerError{Type: reflect.TypeOf(val), Err: err}
 			}
 
 			return writeString(b, string(text)), nil
+		}
+
+		*pEnc = enc
+
+		return enc
+	}
+
+	// Apply the byte-slice fallback after addressability-dependent callbacks.
+	isByteSlice := tp.Kind() == reflect.Slice && tp.Elem().Kind() == reflect.Uint8
+	if isByteSlice && !implementsAnyMarshaler(tp.Elem()) {
+		enc := func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
+			s := *(*[]byte)(ptr)
+			if s == nil {
+				return append(b, "null"...), nil
+			}
+
+			b = append(b, '"')
+			b = base64.StdEncoding.AppendEncode(b, s)
+			b = append(b, '"')
+
+			return b, nil
 		}
 
 		*pEnc = enc
@@ -807,7 +847,7 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 
 		elemTp := tp.Elem()
 		if isFlattenable(elemTp) {
-			te := buildTapeEncoder(elemTp, visiting)
+			te := buildTapeEncoder(elemTp, visiting, true)
 			elemSize := elemTp.Size()
 
 			fixed := buildFixedTape(te)
@@ -914,7 +954,7 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 			return enc
 		}
 
-		elemEnc := buildEncoder(tp.Elem(), visiting)
+		elemEnc := buildEncoder(tp.Elem(), visiting, true)
 		elemSize := tp.Elem().Size()
 
 		enc = func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
@@ -997,7 +1037,7 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 			break
 		}
 
-		elemEnc := buildEncoder(tp.Elem(), visiting)
+		elemEnc := buildEncoder(tp.Elem(), visiting, addressable)
 		elemSize := tp.Elem().Size()
 		length := tp.Len()
 
@@ -1329,17 +1369,17 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 		enc = buildMapEncoder(tp, visiting)
 	case reflect.Struct:
 		if isFlattenable(tp) {
-			te := buildTapeEncoder(tp, visiting)
+			te := buildTapeEncoder(tp, visiting, addressable)
 
 			enc = buildFixedTape(te)
 			if enc == nil {
 				enc = te.encode
 			}
 		} else {
-			enc = buildStructEncoder(tp, visiting)
+			enc = buildStructEncoder(tp, visiting, addressable)
 		}
 	case reflect.Pointer:
-		if pElem, ok := visiting[tp.Elem()]; ok && *pElem == nil {
+		if pElem, ok := visiting[encoderKey{typ: tp.Elem(), addressable: true}]; ok && *pElem == nil {
 			enc = func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
 				ptrptr := *(*unsafe.Pointer)(ptr)
 				if ptrptr == nil {
@@ -1352,7 +1392,7 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 			break
 		}
 
-		elemEnc := buildEncoder(tp.Elem(), visiting)
+		elemEnc := buildEncoder(tp.Elem(), visiting, true)
 
 		enc = func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
 			ptrptr := *(*unsafe.Pointer)(ptr)
@@ -1371,7 +1411,7 @@ func buildEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encod
 	return enc
 }
 
-func collectStructFields(tp reflect.Type, fields *[]structField, visiting map[reflect.Type]*encoderFunc) {
+func collectStructFields(tp reflect.Type, fields *[]structField, visiting map[encoderKey]*encoderFunc, addressable bool) {
 	resolved := resolveStructFields(tp)
 
 	for index := range resolved {
@@ -1385,7 +1425,7 @@ func collectStructFields(tp reflect.Type, fields *[]structField, visiting map[re
 		field := structField{
 			nameBytes: nameBytes,
 			parents:   sf.parents,
-			enc:       buildEncoder(sf.typ, visiting),
+			enc:       buildEncoder(sf.typ, visiting, addressable || len(sf.parents) != 0),
 			offset:    sf.offset,
 		}
 
@@ -1425,10 +1465,10 @@ func collectStructFields(tp reflect.Type, fields *[]structField, visiting map[re
 	}
 }
 
-func buildStructEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encoderFunc {
+func buildStructEncoder(tp reflect.Type, visiting map[encoderKey]*encoderFunc, addressable bool) encoderFunc {
 	var fields []structField
 
-	collectStructFields(tp, &fields, visiting)
+	collectStructFields(tp, &fields, visiting, addressable)
 
 	return func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
 		b = append(b, '{')
@@ -1512,7 +1552,7 @@ func isFlattenable(tp reflect.Type) bool {
 	return true
 }
 
-func buildTapeEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) *tapeEncoder {
+func buildTapeEncoder(tp reflect.Type, visiting map[encoderKey]*encoderFunc, addressable bool) *tapeEncoder {
 	var (
 		te         = new(tapeEncoder)
 		first      bool
@@ -1582,7 +1622,7 @@ func buildTapeEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) *
 			}
 
 			if op == opEnc {
-				ins.enc = buildEncoder(sf.typ, visiting)
+				ins.enc = buildEncoder(sf.typ, visiting, addressable)
 			}
 
 			te.instrs = append(te.instrs, ins)

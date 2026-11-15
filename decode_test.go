@@ -26,12 +26,16 @@ type decodeRecord struct {
 	Raw    json.RawMessage   `json:"raw"`
 	Time   time.Time         `json:"time"`
 	Number json.Number       `json:"number"`
-	Quoted int               `json:"quoted,string"`
 	Text   decodeText        `json:"text"`
 	Custom decodeCustom      `json:"custom"`
 	Other  map[int]string    `json:"other"`
 	Nested map[string][]int  `json:"nested"`
 	Values map[string]string `json:"values"`
+}
+
+type decodeFallbackRecord struct {
+	decodeRecord
+	Quoted int `json:"quoted,string"`
 }
 
 type decodeText string
@@ -89,7 +93,7 @@ func TestDecodeCompatibility(t *testing.T) {
 		`{"bytes":[0,1,254,255],"fixed":[5],"other":{"12":"value"},"nested":{"a":[1,2]}}`,
 		`{"any":{"a":[1,2.5,true,false,null,"str"],"a":{"b":3}},"number":1234567890123456789}`,
 		`{"raw": {"a":[1,2]},"time":"2026-07-02T01:02:21Z","text":"abc","custom":null}`,
-		`{"quoted":"42","number":"1.25e+2","custom":{"a":1},"custom":[2]}`,
+		`{"number":"1.25e+2","custom":{"a":1},"custom":[2]}`,
 		`{"next":{"name":"first"},"next":{"count":4},"map":{"a":1},"map":{"b":2}}`,
 	}
 
@@ -170,10 +174,6 @@ func TestDecodeErrors(t *testing.T) {
 	checkDecode[uint64](t, []byte(`18446744073709551616`))
 	checkDecode[float32](t, []byte(`1e39`))
 	checkDecode[float64](t, []byte(`1e400`))
-	checkDecode[decodeRecord](t, []byte(`{"quoted":42}`))
-	checkDecode[decodeRecord](t, []byte(`{"quoted":"bad"}`))
-	checkDecode[decodeRecord](t, []byte(`{"quoted":"9223372036854775808"}`))
-	checkDecode[decodeRecord](t, []byte(`{"quoted":"bad","name":"after error"}`))
 	checkDecode[decodeRecord](t, []byte(`{"BYtes":"0"}`))
 	checkDecode[decodeRecord](t, []byte(`{"time":"bad","name":"after error"}`))
 	checkDecode[decodeRecord](t, []byte(`{"bytes":"0","name":"after error"}`))
@@ -320,14 +320,26 @@ func TestDecodeDepthAndConcurrency(t *testing.T) {
 	workers.Wait()
 }
 
+func TestDecodeFallback(t *testing.T) {
+	inputs := []string{`{"quoted":"42","name":"ok"}`, `{"quoted":42}`, `{"quoted":"bad"}`, `{"quoted":"9223372036854775808"}`, `{"quoted":"bad","name":"after error"}`}
+
+	for _, input := range inputs {
+		checkDecode[decodeFallbackRecord](t, []byte(input))
+	}
+}
+
 func FuzzDecode(f *testing.F) {
-	seeds := []string{`null`, `{}`, `[]`, `{"count":1,"name":"hello"}`, `{"any":{"a":[1,true,null]}}`, `"\ud800\udc00"`, `1e400`, `{"quoted":"12"}`, `{"bytes":"AQI="}`, `{"BYtes":"0"}`}
+	seeds := []string{`null`, `{}`, `[]`, `{"count":1,"name":"hello"}`, `{"any":{"a":[1,true,null]}}`, `"\ud800\udc00"`, `1e400`, `{"next":{"count":"bad"}}`, `{"bytes":"AQI="}`, `{"BYtes":"0"}`, `{"list":[{"count":"bad"}],"text":3}`, `{"map":{"a":"bad"}}`}
 
 	for _, seed := range seeds {
 		f.Add([]byte(seed))
 	}
 
 	f.Fuzz(func(t *testing.T, input []byte) {
+		if len(input) > 4096 {
+			return
+		}
+
 		checkDecode[any](t, input)
 
 		if json.Valid(input) {

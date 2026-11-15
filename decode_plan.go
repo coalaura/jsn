@@ -262,13 +262,25 @@ func buildDecodeKind(typ reflect.Type, visiting map[reflect.Type]*decodeFunc) de
 	}
 
 	if pointerType.Implements(textUnmarshalerType) {
+		standard := buildStandardDecoder(typ)
+
 		return func(state *decodeState, dst unsafe.Pointer) error {
 			if state.space() == 'n' {
 				return state.literal("null")
 			}
 
 			if state.space() != '"' {
-				return state.mismatch(typ)
+				clean := state.saved == nil
+				err := standard(state, dst)
+
+				if legacyDecodeErrors && clean && state.depth != 0 {
+					mismatch, ok := errors.AsType[*json.UnmarshalTypeError](state.saved)
+					if ok {
+						mismatch.Type = typ
+					}
+				}
+
+				return err
 			}
 
 			raw, simple, err := state.stringToken()

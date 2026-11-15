@@ -3,6 +3,7 @@ package jsn
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strconv"
 	"unsafe"
@@ -13,7 +14,7 @@ func buildSequenceDecoder(typ reflect.Type, visiting map[reflect.Type]*decodeFun
 	decode := buildDecoder(element, visiting)
 	size := element.Size()
 	isSlice := typ.Kind() == reflect.Slice
-	byteSlice := isSlice && element.Kind() == reflect.Uint8 && !reflect.PointerTo(element).Implements(unmarshalerType) && !reflect.PointerTo(element).Implements(textUnmarshalerType)
+	byteSlice := isSlice && element.Kind() == reflect.Uint8
 	initialCapacity := 8
 
 	if size > 32 || element.Kind() == reflect.Pointer {
@@ -49,7 +50,10 @@ func buildSequenceDecoder(typ reflect.Type, visiting map[reflect.Type]*decodeFun
 			if err != nil {
 				state.pos = start
 
-				return buildStandardDecoder(typ)(state, dst)
+				err = buildStandardDecoder(typ)(state, dst)
+				state.save(err)
+
+				return nil
 			}
 
 			*(*[]byte)(dst) = buffer[:length]
@@ -109,6 +113,8 @@ func buildSequenceDecoder(typ reflect.Type, visiting map[reflect.Type]*decodeFun
 				address = unsafe.Add(dst, uintptr(length)*size)
 			}
 
+			clean := state.saved == nil
+
 			if address == nil {
 				err = state.skip()
 			} else {
@@ -117,6 +123,10 @@ func buildSequenceDecoder(typ reflect.Type, visiting map[reflect.Type]*decodeFun
 
 			if err != nil {
 				return err
+			}
+
+			if !legacyDecodeErrors && clean && state.saved != nil {
+				prependDecodePath(state.saved, strconv.Itoa(length))
 			}
 
 			length++
@@ -224,10 +234,15 @@ func buildStringMapDecoder[Value any](typ reflect.Type, decode decodeFunc) decod
 			var zero Value
 
 			value = zero
+			clean := state.saved == nil
 
 			err = decode(state, unsafe.Pointer(&value))
 			if err != nil {
 				return err
+			}
+
+			if !legacyDecodeErrors && clean {
+				prependDecodePath(state.saved, key)
 			}
 
 			(*pointer)[key] = value
@@ -299,10 +314,15 @@ func buildReflectMapDecoder(typ reflect.Type, decode decodeFunc) decodeFunc {
 			state.pos++
 			state.space()
 			element.Elem().SetZero()
+			clean := state.saved == nil
 
 			err = decode(state, address)
 			if err != nil {
 				return err
+			}
+
+			if !legacyDecodeErrors && clean {
+				prependDecodePath(state.saved, key.String())
 			}
 
 			value.SetMapIndex(key, element.Elem())
@@ -320,6 +340,19 @@ func buildReflectMapDecoder(typ reflect.Type, decode decodeFunc) decodeFunc {
 				return errDecodeSyntax
 			}
 		}
+	}
+}
+
+func prependDecodePath(err error, name string) {
+	mismatch, ok := errors.AsType[*json.UnmarshalTypeError](err)
+	if !ok {
+		return
+	}
+
+	if mismatch.Field == "" {
+		mismatch.Field = name
+	} else {
+		mismatch.Field = name + "." + mismatch.Field
 	}
 }
 
@@ -371,9 +404,15 @@ func (state *decodeState) anyValue() (any, error) {
 		}
 
 		for {
+			clean := state.saved == nil
+
 			value, err := state.anyValue()
 			if err != nil {
 				return nil, err
+			}
+
+			if !legacyDecodeErrors && clean && state.saved != nil {
+				prependDecodePath(state.saved, strconv.Itoa(len(values)))
 			}
 
 			values = append(values, value)
@@ -419,9 +458,15 @@ func (state *decodeState) anyValue() (any, error) {
 
 			state.pos++
 
+			clean := state.saved == nil
+
 			value, err := state.anyValue()
 			if err != nil {
 				return nil, err
+			}
+
+			if !legacyDecodeErrors && clean {
+				prependDecodePath(state.saved, key)
 			}
 
 			values[key] = value

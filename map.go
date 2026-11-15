@@ -67,10 +67,10 @@ func (scratch *mapScratch) release() {
 	scratch.pool.free = scratch
 }
 
-func buildMapEncoder(tp reflect.Type, visiting map[reflect.Type]*encoderFunc) encoderFunc {
+func buildMapEncoder(tp reflect.Type, visiting map[encoderKey]*encoderFunc) encoderFunc {
 	keyEncoder := buildMapKeyEncoder(tp.Key())
 	valueType := tp.Elem()
-	valueEncoder := buildEncoder(valueType, visiting)
+	valueEncoder := buildEncoder(valueType, visiting, false)
 	copyValue := mapValueNeedsCopy(valueType)
 
 	return func(enc *Encoder, b []byte, ptr unsafe.Pointer) ([]byte, error) {
@@ -212,7 +212,7 @@ func mapValueNeedsCopy(tp reflect.Type) bool {
 			return false
 		}
 
-		if reflect.PointerTo(tp).Implements(marshaler) {
+		if marshaler == writerMarshalerType && reflect.PointerTo(tp).Implements(marshaler) {
 			return true
 		}
 	}
